@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: mdm-doctor:local
+    image: ${MDM_DOCTOR_IMAGE:-mdm-doctor:local}
     restart: unless-stopped
     init: true
     read_only: true

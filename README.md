@@ -19,6 +19,18 @@ published directly to the public internet.
 The recommended host has at least 12 GiB available memory, 8 GiB available for
 tmpfs, and encrypted swap or swap disabled.
 
+Published releases are available as one multi-architecture image for x64 and
+ARM64:
+
+```sh
+docker pull ghcr.io/darkatek7/mdm-doctor:latest
+MDM_DOCTOR_IMAGE=ghcr.io/darkatek7/mdm-doctor:latest \
+  docker compose up -d --no-build
+```
+
+For reproducible deployments, replace `latest` with a version tag or immutable
+digest shown on the GitHub package page.
+
 ```sh
 cp .env.example .env
 docker compose up -d --build

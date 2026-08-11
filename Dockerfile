@@ -63,7 +63,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim AS runtime
 LABEL org.opencontainers.image.title="MDM Doctor" \
       org.opencontainers.image.description="Transient Microsoft Intune and MDM diagnostics workbench" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/Darkatek7/mdm-doctor"
 RUN groupadd --gid 10001 mdm-doctor && \
     useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin mdm-doctor && \
     mkdir -p /app/static /run/mdm-doctor && \
