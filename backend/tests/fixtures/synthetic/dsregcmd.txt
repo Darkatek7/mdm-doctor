@@ -1,0 +1,5 @@
+AzureAdJoined : YES
+DeviceAuthStatus : SUCCESS
+AzureAdPrt : NO
+Execution context : machine
+Operator : technician@example.invalid

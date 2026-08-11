@@ -1,0 +1,31 @@
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=16m
+      - /var/run:rw,noexec,nosuid,nodev,size=4m
+      - /tmp:rw,noexec,nosuid,nodev,size=4m
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${TLS_CERTIFICATE_PATH:?set TLS_CERTIFICATE_PATH}:/etc/nginx/tls/server.crt:ro
+      - ${TLS_PRIVATE_KEY_PATH:?set TLS_PRIVATE_KEY_PATH}:/etc/nginx/tls/server.key:ro
+    ports:
+      - "${TLS_BIND_ADDRESS:-127.0.0.1}:${TLS_PORT:-8443}:8443"
+    depends_on:
+      mdm-doctor:
+        condition: service_healthy
+    networks:
+      - mdm-doctor-internal
+    logging:
+      driver: none

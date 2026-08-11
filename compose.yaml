@@ -1,0 +1,68 @@
+name: mdm-doctor
+
+services:
+  mdm-doctor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mdm-doctor:local
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 12g
+    mem_reservation: 8g
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+      nofile:
+        soft: 4096
+        hard: 4096
+    tmpfs:
+      - /run/mdm-doctor:rw,noexec,nosuid,nodev,size=8g,uid=10001,gid=10001,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+      PORT: 8080
+      WORKSPACE_PATH: /run/mdm-doctor
+      STATIC_DIR: /app/static
+      JOB_TTL_SECONDS: ${JOB_TTL_SECONDS:-1800}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-1073741824}
+      MAX_EXPANDED_BYTES: ${MAX_EXPANDED_BYTES:-4294967296}
+      MAX_FILE_BYTES: ${MAX_FILE_BYTES:-1073741824}
+      MAX_ARCHIVE_FILES: ${MAX_ARCHIVE_FILES:-100000}
+      MAX_NESTING_DEPTH: ${MAX_NESTING_DEPTH:-4}
+      MAX_COMPRESSION_RATIO: ${MAX_COMPRESSION_RATIO:-100}
+      MAX_AGGREGATE_RATIO: ${MAX_AGGREGATE_RATIO:-50}
+      MAX_EVENTS: ${MAX_EVENTS:-1250000}
+      MAX_ACTIVE_JOBS: ${MAX_ACTIVE_JOBS:-4}
+      MAX_CONCURRENT_UPLOADS: ${MAX_CONCURRENT_UPLOADS:-2}
+      MAX_WORKERS: ${MAX_WORKERS:-2}
+      JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-1200}
+      PARSER_TIMEOUT_SECONDS: ${PARSER_TIMEOUT_SECONDS:-120}
+      TIMELINE_PAGE_SIZE: ${TIMELINE_PAGE_SIZE:-100}
+      TIMELINE_PAGE_MAX: ${TIMELINE_PAGE_MAX:-500}
+      DEBUG_SANITIZED: "false"
+      RUST_BACKTRACE: "0"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mdm-doctor", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - mdm-doctor-internal
+    logging:
+      driver: none
+
+networks:
+  mdm-doctor-internal:
+    internal: true

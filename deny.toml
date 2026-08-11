@@ -1,0 +1,31 @@
+[graph]
+all-features = false
+
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2021-0153", reason = "The pure-Rust evtx decoder depends on encoding 0.2.33; the advisory is unmaintained-only, reports no vulnerability, and has no safe upgrade path." },
+]
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+  "bzip2-1.0.6",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

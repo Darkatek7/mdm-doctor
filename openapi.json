@@ -1,0 +1,1368 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MDM Doctor transient API",
+    "description": "No-auth, no-persistence API for the active transient analysis only.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/job": {
+      "post": {
+        "summary": "Stream an archive and create a transient job",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-MDM-Source-Name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Upload accepted; the 256-bit handle is returned only in X-MDM-Job-Handle"
+          }
+        }
+      },
+      "get": {
+        "summary": "Get active job state",
+        "responses": {
+          "200": {
+            "description": "Current state"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Immediately purge the active job",
+        "responses": {
+          "204": {
+            "description": "Purged or already absent"
+          }
+        }
+      }
+    },
+    "/api/v1/job/cancel": {
+      "post": {
+        "summary": "Cancel and purge analysis",
+        "responses": {
+          "204": {
+            "description": "Cancelled"
+          }
+        }
+      }
+    },
+    "/api/v1/job/reanalyze": {
+      "post": {
+        "summary": "Reanalyze while the transient upload exists",
+        "responses": {
+          "202": {
+            "description": "Queued"
+          }
+        }
+      }
+    },
+    "/api/v1/job/summary": {
+      "get": {
+        "summary": "Evidence-based summary",
+        "responses": {
+          "200": {
+            "description": "Summary"
+          }
+        }
+      }
+    },
+    "/api/v1/job/sessions": {
+      "get": {
+        "summary": "Sessions",
+        "responses": {
+          "200": {
+            "description": "Sessions"
+          }
+        }
+      }
+    },
+    "/api/v1/job/findings": {
+      "get": {
+        "summary": "Evidence-linked findings",
+        "responses": {
+          "200": {
+            "description": "Findings"
+          }
+        }
+      }
+    },
+    "/api/v1/job/applications": {
+      "get": {
+        "summary": "Applications",
+        "responses": {
+          "200": {
+            "description": "Applications"
+          }
+        }
+      }
+    },
+    "/api/v1/job/attempts": {
+      "get": {
+        "summary": "Execution attempts",
+        "responses": {
+          "200": {
+            "description": "Attempts"
+          }
+        }
+      }
+    },
+    "/api/v1/job/entities": {
+      "get": {
+        "summary": "Managed entities",
+        "responses": {
+          "200": {
+            "description": "Entities"
+          }
+        }
+      }
+    },
+    "/api/v1/job/esp": {
+      "get": {
+        "summary": "ESP resources",
+        "responses": {
+          "200": {
+            "description": "ESP state"
+          }
+        }
+      }
+    },
+    "/api/v1/job/provisioning": {
+      "get": {
+        "summary": "Provisioning steps",
+        "responses": {
+          "200": {
+            "description": "Steps"
+          }
+        }
+      }
+    },
+    "/api/v1/job/coverage": {
+      "get": {
+        "summary": "Parser and collection coverage",
+        "responses": {
+          "200": {
+            "description": "Coverage records"
+          }
+        }
+      }
+    },
+    "/api/v1/job/warnings": {
+      "get": {
+        "summary": "Sanitized parser warnings",
+        "responses": {
+          "200": {
+            "description": "Warnings"
+          }
+        }
+      }
+    },
+    "/api/v1/job/artifacts": {
+      "get": {
+        "summary": "Active artifact tree",
+        "responses": {
+          "200": {
+            "description": "Artifacts"
+          }
+        }
+      }
+    },
+    "/api/v1/job/query/timeline": {
+      "post": {
+        "summary": "Body-based bounded timeline query",
+        "responses": {
+          "200": {
+            "description": "Timeline page"
+          }
+        }
+      }
+    },
+    "/api/v1/job/evidence/resolve": {
+      "post": {
+        "summary": "Resolve active evidence identifiers from a request body",
+        "responses": {
+          "200": {
+            "description": "Evidence links"
+          }
+        }
+      }
+    },
+    "/api/v1/job/artifact/preview": {
+      "post": {
+        "summary": "Return an inert bounded text preview",
+        "responses": {
+          "200": {
+            "description": "Safe preview"
+          }
+        }
+      }
+    },
+    "/api/v1/job/artifact/download": {
+      "post": {
+        "summary": "Stream an active transient artifact",
+        "responses": {
+          "200": {
+            "description": "Artifact stream"
+          }
+        }
+      }
+    },
+    "/api/v1/job/export": {
+      "post": {
+        "summary": "Stream an on-demand report",
+        "responses": {
+          "200": {
+            "description": "HTML, CSV, JSON, or PDF"
+          }
+        }
+      }
+    },
+    "/api/v1/compare/summary": {
+      "post": {
+        "summary": "Compare two active jobs using two capability headers",
+        "responses": {
+          "200": {
+            "description": "Transient comparison"
+          }
+        }
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "Alive"
+          }
+        }
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "summary": "Readiness",
+        "responses": {
+          "200": {
+            "description": "Ready"
+          }
+        }
+      }
+    },
+    "/api/v1/limits": {
+      "get": {
+        "summary": "Sanitized configured limits",
+        "responses": {
+          "200": {
+            "description": "Limits"
+          }
+        }
+      }
+    },
+    "/api/v1/build": {
+      "get": {
+        "summary": "Sanitized build metadata",
+        "responses": {
+          "200": {
+            "description": "Build metadata"
+          }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "summary": "OpenAPI 3.1 document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Application": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "app_type",
+          "state",
+          "esp_tracked",
+          "attempt_count",
+          "evidence_ids"
+        ],
+        "properties": {
+          "app_type": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "esp_tracked": {
+            "type": "boolean"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "install_context": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "required": [
+          "id",
+          "layer",
+          "normalized_path",
+          "original_path",
+          "size",
+          "sha256",
+          "detected_type",
+          "parser_status"
+        ],
+        "properties": {
+          "detected_type": {
+            "type": "string"
+          },
+          "duplicate_of": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "normalized_path": {
+            "type": "string"
+          },
+          "original_path": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parser_status": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ArtifactRequest": {
+        "type": "object",
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          }
+        }
+      },
+      "BuildInfo": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "rule_pack",
+          "build"
+        ],
+        "properties": {
+          "build": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rule_pack": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ComparisonSummary": {
+        "type": "object",
+        "required": [
+          "identity_confidence",
+          "identity_explanation",
+          "mode",
+          "analysis_a",
+          "analysis_b",
+          "new_findings",
+          "resolved_findings",
+          "persistent_rule_ids",
+          "coverage_changes"
+        ],
+        "properties": {
+          "analysis_a": {
+            "$ref": "#/components/schemas/Summary"
+          },
+          "analysis_b": {
+            "$ref": "#/components/schemas/Summary"
+          },
+          "coverage_changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "identity_confidence": {
+            "type": "string"
+          },
+          "identity_explanation": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "new_findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "persistent_rule_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resolved_findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          }
+        }
+      },
+      "CoverageRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "classification",
+          "state",
+          "parser",
+          "artifact_count",
+          "explanation"
+        ],
+        "properties": {
+          "artifact_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "classification": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "parser": {
+            "type": "string"
+          },
+          "result_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "EspResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "resource_type",
+          "phase",
+          "substep",
+          "expected_state",
+          "actual_state",
+          "blocking_proven",
+          "first_failure",
+          "evidence_ids"
+        ],
+        "properties": {
+          "actual_state": {
+            "type": "string"
+          },
+          "blocking_proven": {
+            "type": "boolean"
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected_state": {
+            "type": "string"
+          },
+          "first_failure": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "substep": {
+            "type": "string"
+          }
+        }
+      },
+      "EvidenceLink": {
+        "type": "object",
+        "required": [
+          "id",
+          "artifact_id",
+          "label"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "source_span": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EvidenceRequest": {
+        "type": "object",
+        "required": [
+          "evidence_ids"
+        ],
+        "properties": {
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExecutionAttempt": {
+        "type": "object",
+        "required": [
+          "id",
+          "reboot_during_attempt",
+          "state",
+          "evidence_ids"
+        ],
+        "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detection_result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "id": {
+            "type": "string"
+          },
+          "reboot_during_attempt": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ExportFormat": {
+        "type": "string",
+        "enum": [
+          "html",
+          "findings_csv",
+          "timeline_csv",
+          "evidence_json",
+          "pdf"
+        ]
+      },
+      "ExportRequest": {
+        "type": "object",
+        "required": [
+          "format",
+          "include_raw_evidence"
+        ],
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/ExportFormat"
+          },
+          "include_raw_evidence": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Finding": {
+        "type": "object",
+        "required": [
+          "id",
+          "rule_id",
+          "rule_pack",
+          "severity",
+          "confidence",
+          "current",
+          "esp_tracked",
+          "title",
+          "explanation",
+          "recommendation",
+          "evidence"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "esp_tracked": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceLink"
+            }
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "rule_pack": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "JobPhase": {
+        "type": "string",
+        "enum": [
+          "uploading",
+          "queued",
+          "extracting",
+          "parsing",
+          "correlating",
+          "ready",
+          "cancelling",
+          "failed"
+        ]
+      },
+      "JobView": {
+        "type": "object",
+        "required": [
+          "phase",
+          "progress_percent",
+          "stage",
+          "created_at",
+          "expires_at",
+          "can_reanalyze"
+        ],
+        "properties": {
+          "can_reanalyze": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/JobPhase"
+          },
+          "progress_percent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stage": {
+            "type": "string"
+          }
+        }
+      },
+      "Kpis": {
+        "type": "object",
+        "required": [
+          "artifacts",
+          "parsed_events",
+          "findings",
+          "critical_findings",
+          "applications",
+          "coverage_percent"
+        ],
+        "properties": {
+          "applications": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "artifacts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "coverage_percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "critical_findings": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "findings": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "parsed_events": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ManagedEntity": {
+        "type": "object",
+        "required": [
+          "id",
+          "entity_type",
+          "name",
+          "state",
+          "current",
+          "evidence_ids"
+        ],
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ParseWarning": {
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "required": [
+          "content_type",
+          "content",
+          "truncated"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProvisioningStep": {
+        "type": "object",
+        "required": [
+          "id",
+          "phase",
+          "substep",
+          "state",
+          "evidence_ids"
+        ],
+        "properties": {
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "substep": {
+            "type": "string"
+          }
+        }
+      },
+      "PublicLimits": {
+        "type": "object",
+        "required": [
+          "max_upload_bytes",
+          "max_expanded_bytes",
+          "max_file_bytes",
+          "max_archive_files",
+          "max_nesting_depth",
+          "max_events",
+          "job_ttl_seconds",
+          "max_job_ttl_seconds",
+          "max_active_jobs",
+          "timeline_page_size",
+          "timeline_page_max"
+        ],
+        "properties": {
+          "job_ttl_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_active_jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_archive_files": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_events": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_expanded_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_file_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_job_ttl_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_nesting_depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_upload_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "timeline_page_max": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timeline_page_size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "current",
+          "label",
+          "evidence_ids"
+        ],
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Summary": {
+        "type": "object",
+        "required": [
+          "verdict",
+          "confidence",
+          "current_status",
+          "evidence_completeness",
+          "recommended_actions",
+          "kpis",
+          "rule_pack"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "string"
+          },
+          "current_status": {
+            "type": "string"
+          },
+          "evidence_completeness": {
+            "type": "string"
+          },
+          "first_blocking_step": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kpis": {
+            "$ref": "#/components/schemas/Kpis"
+          },
+          "latest_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recommended_actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rule_pack": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        }
+      },
+      "TimelineEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "severity",
+          "message",
+          "current",
+          "evidence_id"
+        ],
+        "properties": {
+          "channel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "component": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "severity": {
+            "type": "string"
+          },
+          "timestamp_original": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp_utc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utc_offset_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "TimelinePage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total_estimate"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEvent"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_estimate": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "TimelineQuery": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "provider": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "search": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

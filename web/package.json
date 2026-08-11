@@ -1,0 +1,27 @@
+{
+  "name": "mdm-doctor-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --test src/privacy.test.mjs",
+    "types:generate": "node scripts/generate-api-types.mjs ../openapi.json src/generated-api.ts"
+  },
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/node": "24.13.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.5"
+  },
+  "overrides": {
+    "picomatch": "4.0.4"
+  }
+}

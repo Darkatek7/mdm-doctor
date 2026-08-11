@@ -1,0 +1,2 @@
+<![LOG[application installer exit code 0]LOG]!><time="10:20:30.123+60" date="8-11-2026" component="Application" context="machine" type="1" thread="1" file="synthetic">
+<![LOG[application detection succeeded]LOG]!><time="10:20:31.123+60" date="8-11-2026" component="Application" context="machine" type="1" thread="1" file="synthetic">

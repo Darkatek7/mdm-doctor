@@ -1,0 +1,31 @@
+# Diagnostic bundles and extracted content must never be committed.
+*.zip
+*.cab
+DiagLogs-*
+diagnostic-archives/
+diagnostic-extracted/
+extracted/
+uploads/
+
+# Transient indexes and generated reports.
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.report.html
+*.report.pdf
+*.evidence.json
+reports/
+benchmarks/private/
+
+# Build and tooling output.
+/target/
+/web/node_modules/
+/web/dist/
+/output/
+.playwright-cli/
+!.gitkeep
+.env
+.DS_Store
+coverage/
