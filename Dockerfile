@@ -29,8 +29,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     --mount=type=secret,id=corporate_ca,required=false,mode=0444 \
     case "$TARGETARCH" in \
-      amd64) rust_target=x86_64-unknown-linux-gnu; cross_package=gcc-x86-64-linux-gnu; cross_cc=x86_64-linux-gnu-gcc ;; \
-      arm64) rust_target=aarch64-unknown-linux-gnu; cross_package=gcc-aarch64-linux-gnu; cross_cc=aarch64-linux-gnu-gcc ;; \
+      amd64) rust_target=x86_64-unknown-linux-gnu; cross_packages="gcc-x86-64-linux-gnu libc6-dev-amd64-cross"; cross_cc=x86_64-linux-gnu-gcc ;; \
+      arm64) rust_target=aarch64-unknown-linux-gnu; cross_packages="gcc-aarch64-linux-gnu libc6-dev-arm64-cross"; cross_cc=aarch64-linux-gnu-gcc ;; \
       *) echo "unsupported target architecture: $TARGETARCH" >&2; exit 64 ;; \
     esac && \
     if [ "$BUILDARCH" = "$TARGETARCH" ]; then \
@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         apt_ca=; \
       fi && \
       apt-get $apt_ca update && \
-      apt-get $apt_ca install --yes --no-install-recommends "$cross_package" && \
+      apt-get $apt_ca install --yes --no-install-recommends $cross_packages && \
       target_cc="$cross_cc"; \
     fi && \
     rustup target add "$rust_target" && \
