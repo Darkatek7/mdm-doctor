@@ -298,6 +298,19 @@ pub struct ApplicationQuery {
     pub limit: Option<usize>,
     pub search: Option<String>,
     pub state: Option<Vec<String>>,
+    pub app_type: Option<Vec<String>>,
+    pub esp_tracked: Option<bool>,
+    pub attempted: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct ApplicationSummary {
+    pub total: u64,
+    pub attempted: u64,
+    pub failed: u64,
+    pub succeeded: u64,
+    pub observed: u64,
+    pub esp_tracked: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -305,6 +318,7 @@ pub struct ApplicationPage {
     pub items: Vec<Application>,
     pub next_cursor: Option<u64>,
     pub total: u64,
+    pub summary: ApplicationSummary,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
@@ -314,6 +328,24 @@ pub struct EntityQuery {
     pub search: Option<String>,
     pub entity_type: Option<Vec<String>>,
     pub state: Option<Vec<String>>,
+    pub current: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct EntityTypeCount {
+    pub entity_type: String,
+    pub count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct EntitySummary {
+    pub total: u64,
+    pub current: u64,
+    pub historical: u64,
+    pub failed: u64,
+    pub succeeded: u64,
+    pub observed: u64,
+    pub by_type: Vec<EntityTypeCount>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -321,6 +353,7 @@ pub struct EntityPage {
     pub items: Vec<ManagedEntity>,
     pub next_cursor: Option<u64>,
     pub total: u64,
+    pub summary: EntitySummary,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

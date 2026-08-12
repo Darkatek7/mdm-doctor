@@ -15,14 +15,27 @@ export type Application = {
 export type ApplicationPage = {
   "items": Array<Application>;
   "next_cursor"?: number | null;
+  "summary": ApplicationSummary;
   "total": number;
 };
 
 export type ApplicationQuery = {
+  "app_type"?: Array<string> | null;
+  "attempted"?: boolean | null;
   "cursor"?: number | null;
+  "esp_tracked"?: boolean | null;
   "limit"?: number | null;
   "search"?: string | null;
   "state"?: Array<string> | null;
+};
+
+export type ApplicationSummary = {
+  "attempted": number;
+  "esp_tracked": number;
+  "failed": number;
+  "observed": number;
+  "succeeded": number;
+  "total": number;
 };
 
 export type Artifact = {
@@ -76,15 +89,32 @@ export type CoverageRecord = {
 export type EntityPage = {
   "items": Array<ManagedEntity>;
   "next_cursor"?: number | null;
+  "summary": EntitySummary;
   "total": number;
 };
 
 export type EntityQuery = {
+  "current"?: boolean | null;
   "cursor"?: number | null;
   "entity_type"?: Array<string> | null;
   "limit"?: number | null;
   "search"?: string | null;
   "state"?: Array<string> | null;
+};
+
+export type EntitySummary = {
+  "by_type": Array<EntityTypeCount>;
+  "current": number;
+  "failed": number;
+  "historical": number;
+  "observed": number;
+  "succeeded": number;
+  "total": number;
+};
+
+export type EntityTypeCount = {
+  "count": number;
+  "entity_type": string;
 };
 
 export type ErrorBody = {
@@ -334,11 +364,12 @@ export type TimelineQuery = {
   "temporal_scope"?: Array<string> | null;
 };
 
-export type ApiSchemaName = "Application" | "ApplicationPage" | "ApplicationQuery" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "EntityPage" | "EntityQuery" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "FindingCounts" | "FindingPage" | "FindingQuery" | "HealthCheck" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "PrimaryDiagnosis" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery";
+export type ApiSchemaName = "Application" | "ApplicationPage" | "ApplicationQuery" | "ApplicationSummary" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "EntityPage" | "EntityQuery" | "EntitySummary" | "EntityTypeCount" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "FindingCounts" | "FindingPage" | "FindingQuery" | "HealthCheck" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "PrimaryDiagnosis" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery";
 export const apiSchemaNames = [
   "Application",
   "ApplicationPage",
   "ApplicationQuery",
+  "ApplicationSummary",
   "Artifact",
   "ArtifactRequest",
   "BuildInfo",
@@ -346,6 +377,8 @@ export const apiSchemaNames = [
   "CoverageRecord",
   "EntityPage",
   "EntityQuery",
+  "EntitySummary",
+  "EntityTypeCount",
   "ErrorBody",
   "EspResource",
   "EvidenceLink",

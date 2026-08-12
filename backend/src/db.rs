@@ -6,11 +6,11 @@ use crate::{
     RULE_PACK_VERSION,
     error::{AppError, Result},
     models::{
-        Application, ApplicationPage, ApplicationQuery, Artifact, CoverageRecord, EntityPage,
-        EntityQuery, EspResource, EvidenceLink, ExecutionAttempt, Finding, FindingCounts,
-        FindingPage, FindingQuery, HealthCheck, Kpis, ManagedEntity, ParseWarning,
-        PrimaryDiagnosis, ProvisioningStep, Session, Summary, TimelineEvent, TimelinePage,
-        TimelineQuery,
+        Application, ApplicationPage, ApplicationQuery, ApplicationSummary, Artifact,
+        CoverageRecord, EntityPage, EntityQuery, EntitySummary, EntityTypeCount, EspResource,
+        EvidenceLink, ExecutionAttempt, Finding, FindingCounts, FindingPage, FindingQuery,
+        HealthCheck, Kpis, ManagedEntity, ParseWarning, PrimaryDiagnosis, ProvisioningStep,
+        Session, Summary, TimelineEvent, TimelinePage, TimelineQuery,
     },
 };
 
@@ -733,6 +733,23 @@ pub fn query_applications(
         values.push(Value::Text(format!("%{}%", search.to_ascii_lowercase())));
     }
     push_list_filter(&mut where_sql, &mut values, "state", q.state.as_deref());
+    push_list_filter(
+        &mut where_sql,
+        &mut values,
+        "app_type",
+        q.app_type.as_deref(),
+    );
+    if let Some(tracked) = q.esp_tracked {
+        where_sql.push("esp_tracked=?".to_owned());
+        values.push(Value::Integer(i64::from(tracked)));
+    }
+    if let Some(attempted) = q.attempted {
+        where_sql.push(if attempted {
+            "attempt_count>0".to_owned()
+        } else {
+            "attempt_count=0".to_owned()
+        });
+    }
     let condition = if where_sql.is_empty() {
         String::new()
     } else {
@@ -742,6 +759,20 @@ pub fn query_applications(
         &format!("SELECT COUNT(*) FROM applications{condition}"),
         params_from_iter(values.iter()),
         |r| r.get(0),
+    )?;
+    let summary = conn.query_row(
+        "SELECT COUNT(*),COALESCE(SUM(attempt_count>0),0),COALESCE(SUM(state='failed'),0),COALESCE(SUM(state='succeeded'),0),COALESCE(SUM(state='observed'),0),COALESCE(SUM(esp_tracked),0) FROM applications",
+        [],
+        |row| {
+            Ok(ApplicationSummary {
+                total: row.get::<_, i64>(0)? as u64,
+                attempted: row.get::<_, i64>(1)? as u64,
+                failed: row.get::<_, i64>(2)? as u64,
+                succeeded: row.get::<_, i64>(3)? as u64,
+                observed: row.get::<_, i64>(4)? as u64,
+                esp_tracked: row.get::<_, i64>(5)? as u64,
+            })
+        },
     )?;
     let mut page_values = values;
     page_values.push(Value::Integer((limit + 1) as i64));
@@ -755,6 +786,7 @@ pub fn query_applications(
         items,
         next_cursor: has_more.then_some(offset + limit as u64),
         total: total as u64,
+        summary,
     })
 }
 
@@ -807,6 +839,10 @@ pub fn query_entities(conn: &Connection, q: &EntityQuery, max_limit: usize) -> R
         q.entity_type.as_deref(),
     );
     push_list_filter(&mut where_sql, &mut values, "state", q.state.as_deref());
+    if let Some(current) = q.current {
+        where_sql.push("current=?".to_owned());
+        values.push(Value::Integer(i64::from(current)));
+    }
     let condition = if where_sql.is_empty() {
         String::new()
     } else {
@@ -817,6 +853,46 @@ pub fn query_entities(conn: &Connection, q: &EntityQuery, max_limit: usize) -> R
         params_from_iter(values.iter()),
         |r| r.get(0),
     )?;
+    let mut scope_clauses = Vec::new();
+    let mut scope_values = Vec::<Value>::new();
+    push_list_filter(
+        &mut scope_clauses,
+        &mut scope_values,
+        "entity_type",
+        q.entity_type.as_deref(),
+    );
+    let scope_condition = if scope_clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", scope_clauses.join(" AND "))
+    };
+    let mut summary = conn.query_row(
+        &format!("SELECT COUNT(*),COALESCE(SUM(current),0),COALESCE(SUM(NOT current),0),COALESCE(SUM(state='failed'),0),COALESCE(SUM(state='succeeded'),0),COALESCE(SUM(state='observed'),0) FROM managed_entities{scope_condition}"),
+        params_from_iter(scope_values.iter()),
+        |row| {
+            Ok(EntitySummary {
+                total: row.get::<_, i64>(0)? as u64,
+                current: row.get::<_, i64>(1)? as u64,
+                historical: row.get::<_, i64>(2)? as u64,
+                failed: row.get::<_, i64>(3)? as u64,
+                succeeded: row.get::<_, i64>(4)? as u64,
+                observed: row.get::<_, i64>(5)? as u64,
+                by_type: Vec::new(),
+            })
+        },
+    )?;
+    let mut type_stmt = conn.prepare(&format!(
+        "SELECT entity_type,COUNT(*) FROM managed_entities{scope_condition} GROUP BY entity_type ORDER BY COUNT(*) DESC,entity_type"
+    ))?;
+    summary.by_type = collect(type_stmt.query_map(
+        params_from_iter(scope_values.iter()),
+        |row| {
+            Ok(EntityTypeCount {
+                entity_type: row.get(0)?,
+                count: row.get::<_, i64>(1)? as u64,
+            })
+        },
+    )?)?;
     let mut page_values = values;
     page_values.push(Value::Integer((limit + 1) as i64));
     page_values.push(Value::Integer(offset as i64));
@@ -828,6 +904,7 @@ pub fn query_entities(conn: &Connection, q: &EntityQuery, max_limit: usize) -> R
         items,
         next_cursor: has_more.then_some(offset + limit as u64),
         total: total as u64,
+        summary,
     })
 }
 
@@ -1415,10 +1492,15 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let conn = open(&root.path().join("analysis.sqlite")).unwrap();
         initialize(&conn).unwrap();
-        for (id, entity_type, name) in [
-            ("entity:app", "application", "Contoso App"),
-            ("entity:policy", "policy", "Security Baseline"),
-            ("entity:network", "network profile", "Corporate Wi-Fi"),
+        for (id, entity_type, name, current) in [
+            ("entity:app", "application", "Contoso App", true),
+            ("entity:policy", "policy", "Security Baseline", true),
+            (
+                "entity:network",
+                "network profile",
+                "Corporate Wi-Fi",
+                false,
+            ),
         ] {
             insert_entity(
                 &conn,
@@ -1427,7 +1509,7 @@ mod tests {
                     entity_type: entity_type.into(),
                     name: name.into(),
                     state: "observed".into(),
-                    current: true,
+                    current,
                     evidence_ids: Vec::new(),
                 },
             )
@@ -1441,14 +1523,60 @@ mod tests {
                 search: None,
                 entity_type: Some(vec!["policy".into(), "network profile".into()]),
                 state: None,
+                current: Some(true),
             },
             100,
         )
         .unwrap();
-        assert_eq!(page.total, 2);
-        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].entity_type, "policy");
         assert_eq!(page.items[0].name, "Security Baseline");
-        assert_eq!(page.items[1].entity_type, "network profile");
+        assert_eq!(page.summary.total, 2);
+        assert_eq!(page.summary.current, 1);
+        assert_eq!(page.summary.historical, 1);
+    }
+
+    #[test]
+    fn application_filters_prioritize_correlated_attempts() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open(&root.path().join("analysis.sqlite")).unwrap();
+        initialize(&conn).unwrap();
+        for (id, name, state, attempts) in [
+            ("app:inventory", "Inventory App", "observed", 0),
+            ("app:failed", "Failed App", "failed", 2),
+            ("app:success", "Successful App", "succeeded", 1),
+        ] {
+            insert_application(
+                &conn,
+                &Application {
+                    id: id.into(),
+                    name: name.into(),
+                    app_type: "Managed".into(),
+                    intent: None,
+                    install_context: None,
+                    state: state.into(),
+                    esp_tracked: false,
+                    attempt_count: attempts,
+                    evidence_ids: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
+        let page = query_applications(
+            &conn,
+            &ApplicationQuery {
+                attempted: Some(true),
+                state: Some(vec!["failed".into()]),
+                ..Default::default()
+            },
+            100,
+        )
+        .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].name, "Failed App");
+        assert_eq!(page.summary.total, 3);
+        assert_eq!(page.summary.attempted, 2);
+        assert_eq!(page.summary.failed, 1);
     }
 }

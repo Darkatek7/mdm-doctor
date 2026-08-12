@@ -1,6 +1,7 @@
 import type {
   Application,
   ApplicationPage,
+  ApplicationSummary,
   Artifact,
   ComparisonSummary,
   CoverageRecord,
@@ -13,6 +14,7 @@ import type {
   Kpis,
   ManagedEntity,
   EntityPage,
+  EntitySummary,
   ParseWarning,
   PreviewResponse,
   ProvisioningStep,
@@ -26,6 +28,7 @@ import type {
 export type {
   Application,
   ApplicationPage,
+  ApplicationSummary,
   Artifact,
   EspResource,
   EvidenceLink,
@@ -40,6 +43,7 @@ export type {
   TimelineEvent,
   TimelinePage,
   EntityPage,
+  EntitySummary,
 };
 
 export const JOB_HEADER = "X-MDM-Job-Handle";

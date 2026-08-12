@@ -42,4 +42,12 @@ describe("browser privacy contract", () => {
     assert.match(source, /entity_type:POLICY_ENTITY_TYPES/);
     assert.doesNotMatch(source, /POLICY_ENTITY_TYPES=\[[^\]]*"application"/);
   });
+
+  it("prioritizes attempted applications and current policy evidence", () => {
+    const source = readFileSync(new URL("App.tsx", import.meta.url), "utf8");
+    assert.match(source, /query\/applications[\s\S]*attempted:true/);
+    assert.match(source, /query\/entities[\s\S]*current:true/);
+    assert.match(source, /label="Execution" values=\{\["attempted","inventory_only"\]\}/);
+    assert.match(source, /label="Scope" values=\{\["current","historical"\]\}/);
+  });
 });

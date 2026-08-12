@@ -375,7 +375,8 @@
         "type": "object",
         "required": [
           "items",
-          "total"
+          "total",
+          "summary"
         ],
         "properties": {
           "items": {
@@ -392,6 +393,9 @@
             "format": "int64",
             "minimum": 0
           },
+          "summary": {
+            "$ref": "#/components/schemas/ApplicationSummary"
+          },
           "total": {
             "type": "integer",
             "format": "int64",
@@ -402,6 +406,21 @@
       "ApplicationQuery": {
         "type": "object",
         "properties": {
+          "app_type": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "attempted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cursor": {
             "type": [
               "integer",
@@ -409,6 +428,12 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "esp_tracked": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "limit": {
             "type": [
@@ -431,6 +456,49 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "ApplicationSummary": {
+        "type": "object",
+        "required": [
+          "total",
+          "attempted",
+          "failed",
+          "succeeded",
+          "observed",
+          "esp_tracked"
+        ],
+        "properties": {
+          "attempted": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "esp_tracked": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "observed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -631,7 +699,8 @@
         "type": "object",
         "required": [
           "items",
-          "total"
+          "total",
+          "summary"
         ],
         "properties": {
           "items": {
@@ -648,6 +717,9 @@
             "format": "int64",
             "minimum": 0
           },
+          "summary": {
+            "$ref": "#/components/schemas/EntitySummary"
+          },
           "total": {
             "type": "integer",
             "format": "int64",
@@ -658,6 +730,12 @@
       "EntityQuery": {
         "type": "object",
         "properties": {
+          "current": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cursor": {
             "type": [
               "integer",
@@ -696,6 +774,73 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "EntitySummary": {
+        "type": "object",
+        "required": [
+          "total",
+          "current",
+          "historical",
+          "failed",
+          "succeeded",
+          "observed",
+          "by_type"
+        ],
+        "properties": {
+          "by_type": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityTypeCount"
+            }
+          },
+          "current": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "historical": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "observed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "EntityTypeCount": {
+        "type": "object",
+        "required": [
+          "entity_type",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_type": {
+            "type": "string"
           }
         }
       },
