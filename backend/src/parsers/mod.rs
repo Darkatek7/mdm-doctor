@@ -1,8 +1,12 @@
 mod cmtrace;
 mod evtx_file;
 mod structured;
+mod text_reader;
 
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use rusqlite::Connection;
 
@@ -11,7 +15,7 @@ use crate::{
     db,
     error::Result,
     ingest::{ExtractedArtifact, stable_id},
-    models::{CoverageRecord, EvidenceLink, ParseWarning},
+    models::{CoverageRecord, ParseWarning},
 };
 
 #[cfg(all(unix, not(test)))]
@@ -41,6 +45,18 @@ pub struct ParserContext<'a> {
     pub max_events: u64,
     pub emitted: u64,
     pub warnings: u64,
+    pub attempted: u64,
+    pub duplicate_events: u64,
+    seen: HashSet<String>,
+    duplicate_counts: HashMap<String, u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ParseStats {
+    pub unique_events: u64,
+    pub duplicate_events: u64,
+    pub attempted_events: u64,
+    pub warnings: u64,
 }
 
 pub struct EventInput<'a> {
@@ -61,9 +77,7 @@ pub struct EventInput<'a> {
 
 impl ParserContext<'_> {
     pub fn emit(&mut self, event: EventInput<'_>) -> Result<Option<String>> {
-        if self.emitted >= self.max_events {
-            return Ok(None);
-        }
+        self.attempted += 1;
         let signature = format!(
             "{}\0{}\0{}\0{}\0{}\0{}",
             event.timestamp_utc.unwrap_or(""),
@@ -74,7 +88,16 @@ impl ParserContext<'_> {
             event.message
         );
         let event_id = stable_id("event", &signature);
-        db::insert_event(
+        if !self.seen.insert(event_id.clone()) {
+            self.duplicate_events += 1;
+            *self.duplicate_counts.entry(event_id.clone()).or_default() += 1;
+            return Ok(Some(event_id));
+        }
+        if self.emitted >= self.max_events {
+            self.seen.remove(&event_id);
+            return Ok(None);
+        }
+        let inserted = db::insert_event(
             self.conn,
             &event_id,
             event.artifact_id,
@@ -91,31 +114,26 @@ impl ParserContext<'_> {
             event.message,
             event.source_span,
         )?;
-        let evidence_id = stable_id(
-            "evidence",
-            &format!(
-                "{}:{}:{}",
-                event.artifact_id,
-                event_id,
-                event.source_span.unwrap_or("")
-            ),
-        );
-        db::insert_evidence(
-            self.conn,
-            None,
-            &EvidenceLink {
-                id: evidence_id,
-                artifact_id: event.artifact_id.to_owned(),
-                event_id: Some(event_id.clone()),
-                source_span: event.source_span.map(str::to_owned),
-                label: format!(
-                    "{} evidence",
-                    event.component.or(event.provider).unwrap_or("source")
-                ),
-            },
-        )?;
+        if inserted.is_none() {
+            self.duplicate_events += 1;
+            *self.duplicate_counts.entry(event_id.clone()).or_default() += 1;
+            return Ok(Some(event_id));
+        }
         self.emitted += 1;
         Ok(Some(event_id))
+    }
+
+    pub fn limit_reached(&self) -> bool {
+        self.emitted >= self.max_events
+    }
+
+    fn stats(&self) -> ParseStats {
+        ParseStats {
+            unique_events: self.emitted,
+            duplicate_events: self.duplicate_events,
+            attempted_events: self.attempted,
+            warnings: self.warnings,
+        }
     }
 
     pub fn warn(&mut self, artifact_id: Option<&str>, code: &str, message: &str) -> Result<()> {
@@ -137,19 +155,61 @@ impl ParserContext<'_> {
     }
 }
 
-pub fn parse_all(
+pub fn parse_all<F>(
     conn: &Connection,
     artifacts: &[ExtractedArtifact],
     config: &Config,
-) -> Result<u64> {
+    mut on_progress: F,
+) -> Result<ParseStats>
+where
+    F: FnMut(u64, u64, ParseStats) -> Result<()>,
+{
     let mut ctx = ParserContext {
         conn,
         max_events: config.max_events,
         emitted: 0,
         warnings: 0,
+        attempted: 0,
+        duplicate_events: 0,
+        seen: HashSet::with_capacity(config.max_events.min(500_000) as usize),
+        duplicate_counts: HashMap::new(),
     };
     let mut coverage = std::collections::BTreeMap::<String, (u64, String, String)>::new();
-    for artifact in artifacts {
+    let total = artifacts.len() as u64;
+    let mut limit_warned = false;
+    for (index, artifact) in artifacts.iter().enumerate() {
+        if artifact.duplicate_of.is_some() {
+            db::set_artifact_status(
+                conn,
+                &artifact.id,
+                "deduplicated",
+                Some("Identical content was parsed through its canonical artifact."),
+            )?;
+            on_progress(index as u64 + 1, total, ctx.stats())?;
+            continue;
+        }
+        if ctx.limit_reached() {
+            if !limit_warned {
+                ctx.warn(None, "events.limit", "The configured unique-event limit was reached; remaining sources were classified but not indexed.")?;
+                limit_warned = true;
+            }
+            db::set_artifact_status(
+                conn,
+                &artifact.id,
+                "skipped",
+                Some("Unique-event safety limit reached before this artifact."),
+            )?;
+            let category = coverage_category(&artifact.normalized_path, &artifact.detected_type);
+            let entry = coverage.entry(category.0.to_owned()).or_insert((
+                0,
+                category.1.to_owned(),
+                "partial".into(),
+            ));
+            entry.0 += 1;
+            entry.2 = "partial".into();
+            on_progress(index as u64 + 1, total, ctx.stats())?;
+            continue;
+        }
         #[cfg(all(unix, not(test)))]
         let _deadline = ParserDeadline::start(config.parser_timeout.as_secs());
         let result = match artifact.detected_type.as_str() {
@@ -213,29 +273,15 @@ pub fn parse_all(
                     entry.2 = "parsed".into();
                 }
             }
-            Err(_) => {
-                ctx.warn(
-                    Some(&artifact.id),
-                    "parser.failed",
-                    "The parser rejected this artifact; other sources remain available.",
-                )?;
-                db::set_artifact_status(
-                    conn,
-                    &artifact.id,
-                    "failed",
-                    Some("Parser rejected the artifact."),
-                )?;
+            Err(error) => {
+                let (code, message) = safe_parser_error(&error);
+                ctx.warn(Some(&artifact.id), code, message)?;
+                db::set_artifact_status(conn, &artifact.id, "failed", Some(message))?;
             }
         }
-        if ctx.emitted >= config.max_events {
-            ctx.warn(
-                None,
-                "events.limit",
-                "The configured event limit was reached; coverage is partial.",
-            )?;
-            break;
-        }
+        on_progress(index as u64 + 1, total, ctx.stats())?;
     }
+    db::add_event_occurrences(conn, &ctx.duplicate_counts)?;
     for (source, (count, classification, state)) in coverage {
         let id = stable_id("coverage", &source);
         db::upsert_coverage(
@@ -246,6 +292,8 @@ pub fn parse_all(
                 classification,
                 state: if state == "unsupported" {
                     "unsupported".into()
+                } else if state == "partial" {
+                    "partial".into()
                 } else if state == "failed" {
                     "failed".into()
                 } else {
@@ -256,6 +304,8 @@ pub fn parse_all(
                 artifact_count: count,
                 explanation: if state == "unsupported" {
                     "The source is present but no safe parser is enabled.".into()
+                } else if state == "partial" {
+                    "The source was recognized but the unique-event safety limit prevented complete indexing.".into()
                 } else {
                     "The source was inspected by a typed parser.".into()
                 },
@@ -263,7 +313,24 @@ pub fn parse_all(
         )?;
     }
     add_expected_coverage(conn)?;
-    Ok(ctx.emitted)
+    Ok(ctx.stats())
+}
+
+fn safe_parser_error(error: &crate::error::AppError) -> (&'static str, &'static str) {
+    match error {
+        crate::error::AppError::Timeout => (
+            "parser.timeout",
+            "The artifact parser exceeded its bounded time limit.",
+        ),
+        crate::error::AppError::BadRequest => (
+            "parser.malformed",
+            "The artifact format is malformed or exceeds the parser's bounded format limit.",
+        ),
+        _ => (
+            "parser.io",
+            "The artifact could not be decoded completely; other recognized sources remain available.",
+        ),
+    }
 }
 
 fn add_expected_coverage(conn: &Connection) -> Result<()> {

@@ -118,6 +118,24 @@ fn validate_archive(input: PathBuf, label: &str) -> Result<()> {
     let summary = mdm_doctor::db::summary(&conn)?;
     let coverage = mdm_doctor::db::coverage(&conn)?;
     let warnings = mdm_doctor::db::warnings(&conn)?;
+    let database_bytes = std::fs::metadata(workspace.0.join(mdm_doctor::db::DB_FILE))?.len();
+    let parser_failures = warnings
+        .iter()
+        .filter(|warning| warning.code.starts_with("parser."))
+        .count();
+    let event_limit_reached = warnings
+        .iter()
+        .any(|warning| warning.code == "events.limit");
+    let unknown_applications: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM applications WHERE name='Unknown application'",
+        [],
+        |row| row.get(0),
+    )?;
+    let placeholder_applications: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM applications WHERE name GLOB 'Application [0-9]*'",
+        [],
+        |row| row.get(0),
+    )?;
     let output = serde_json::json!({
         "label":label,
         "status":"ready",
@@ -129,6 +147,11 @@ fn validate_archive(input: PathBuf, label: &str) -> Result<()> {
         "coverage_percent":summary.kpis.coverage_percent,
         "coverage_records":coverage.len(),
         "warnings":warnings.len()
+        ,"parser_failures":parser_failures
+        ,"event_limit_reached":event_limit_reached
+        ,"database_bytes":database_bytes
+        ,"unknown_applications":unknown_applications
+        ,"placeholder_applications":placeholder_applications
     });
     serde_json::to_writer(std::io::stdout().lock(), &output)
         .map_err(mdm_doctor::error::AppError::internal)?;

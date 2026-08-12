@@ -3,9 +3,9 @@ use std::sync::OnceLock;
 use regex::{Captures, Regex};
 
 use crate::models::{
-    Application, Artifact, ComparisonSummary, CoverageRecord, EvidenceLink, ExecutionAttempt,
-    Finding, ManagedEntity, ParseWarning, ProvisioningStep, RedactionMode, Session, Summary,
-    TimelinePage,
+    Application, ApplicationPage, Artifact, ComparisonSummary, CoverageRecord, EntityPage,
+    EvidenceLink, ExecutionAttempt, Finding, FindingPage, ManagedEntity, ParseWarning,
+    ProvisioningStep, RedactionMode, Session, Summary, TimelinePage,
 };
 
 fn email_re() -> &'static Regex {
@@ -79,6 +79,16 @@ pub fn summary(mut value: Summary, mode: RedactionMode) -> Summary {
         .into_iter()
         .map(|v| text(&v, mode))
         .collect();
+    if let Some(diagnosis) = &mut value.primary_diagnosis {
+        diagnosis.title = text(&diagnosis.title, mode);
+        diagnosis.recommendation = text(&diagnosis.recommendation, mode);
+        // Display names are operational labels. Source identifiers are never
+        // stored in this field and remain subject to redaction elsewhere.
+    }
+    for check in &mut value.health_checks {
+        check.detail = text(&check.detail, mode);
+    }
+    value.coverage_warning = value.coverage_warning.map(|v| text(&v, mode));
     value
 }
 
@@ -97,24 +107,25 @@ pub fn findings(mut values: Vec<Finding>, mode: RedactionMode) -> Vec<Finding> {
     values
 }
 
-pub fn applications(mut values: Vec<Application>, mode: RedactionMode) -> Vec<Application> {
-    if mode == RedactionMode::Original {
-        return values;
-    }
-    for (index, value) in values.iter_mut().enumerate() {
-        value.name = format!("Application {}", index + 1);
-    }
+pub fn finding_page(mut page: FindingPage, mode: RedactionMode) -> FindingPage {
+    page.items = findings(page.items, mode);
+    page
+}
+
+pub fn applications(values: Vec<Application>, _mode: RedactionMode) -> Vec<Application> {
     values
 }
 
-pub fn entities(mut values: Vec<ManagedEntity>, mode: RedactionMode) -> Vec<ManagedEntity> {
-    if mode == RedactionMode::Original {
-        return values;
-    }
-    for (index, value) in values.iter_mut().enumerate() {
-        value.name = format!("{} {}", title(&value.entity_type), index + 1);
-    }
+pub fn application_page(page: ApplicationPage, _mode: RedactionMode) -> ApplicationPage {
+    page
+}
+
+pub fn entities(values: Vec<ManagedEntity>, _mode: RedactionMode) -> Vec<ManagedEntity> {
     values
+}
+
+pub fn entity_page(page: EntityPage, _mode: RedactionMode) -> EntityPage {
+    page
 }
 
 pub fn artifacts(mut values: Vec<Artifact>, mode: RedactionMode) -> Vec<Artifact> {
@@ -198,14 +209,6 @@ pub fn warnings(mut values: Vec<ParseWarning>, mode: RedactionMode) -> Vec<Parse
     values
 }
 
-fn title(value: &str) -> String {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-        None => "Entity".into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +221,24 @@ mod tests {
         assert!(!output.contains("HOST-123"));
         assert!(!output.contains("192.0.2.42"));
         assert!(!output.contains("00000000"));
+    }
+
+    #[test]
+    fn keeps_operational_application_names_in_redacted_mode() {
+        let values = vec![Application {
+            id: "app:synthetic".into(),
+            name: "Contoso Support Tool".into(),
+            app_type: "Win32".into(),
+            intent: None,
+            install_context: None,
+            state: "observed".into(),
+            esp_tracked: false,
+            attempt_count: 0,
+            evidence_ids: Vec::new(),
+        }];
+        assert_eq!(
+            applications(values, RedactionMode::Redacted)[0].name,
+            "Contoso Support Tool"
+        );
     }
 }

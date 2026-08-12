@@ -28,10 +28,13 @@ use crate::{
     error::{AppError, ErrorBody, Result},
     exports, ingest,
     models::{
-        Application, Artifact, ArtifactRequest, BuildInfo, ComparisonSummary, CoverageRecord,
-        EspResource, EvidenceLink, EvidenceRequest, ExecutionAttempt, ExportRequest, Finding,
-        HealthResponse, JobPhase, JobView, ManagedEntity, ParseWarning, PreviewResponse,
-        ProvisioningStep, RedactionMode, Session, Summary, TimelinePage, TimelineQuery,
+        Application, ApplicationPage, ApplicationQuery, ApplicationSummary, Artifact,
+        ArtifactRequest, BuildInfo, ComparisonSummary, CoverageRecord, EntityPage, EntityQuery,
+        EntitySummary, EntityTypeCount, EspResource, EvidenceLink, EvidenceRequest,
+        ExecutionAttempt, ExportRequest, Finding, FindingCounts, FindingPage, FindingQuery,
+        HealthCheck, HealthResponse, JobPhase, JobView, ManagedEntity, ParseWarning,
+        PreviewResponse, PrimaryDiagnosis, ProvisioningStep, RedactionMode, Session, Summary,
+        TimelinePage, TimelineQuery,
     },
     redaction,
     store::{AppState, Job},
@@ -56,12 +59,24 @@ pub const SOURCE_HEADER: &str = "x-mdm-source-name";
         HealthResponse,
         JobView,
         Summary,
+        PrimaryDiagnosis,
+        HealthCheck,
+        FindingCounts,
         Finding,
+        FindingQuery,
+        FindingPage,
         EvidenceLink,
         Session,
         Application,
+        ApplicationQuery,
+        ApplicationPage,
+        ApplicationSummary,
         ExecutionAttempt,
         ManagedEntity,
+        EntityQuery,
+        EntityPage,
+        EntitySummary,
+        EntityTypeCount,
         EspResource,
         ProvisioningStep,
         CoverageRecord,
@@ -102,6 +117,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/job/warnings", get(warnings))
         .route("/api/v1/job/artifacts", get(artifacts))
         .route("/api/v1/job/query/timeline", post(timeline))
+        .route("/api/v1/job/query/findings", post(query_findings))
+        .route("/api/v1/job/query/applications", post(query_applications))
+        .route("/api/v1/job/query/entities", post(query_entities))
         .route("/api/v1/job/evidence/resolve", post(resolve_evidence))
         .route("/api/v1/job/artifact/preview", post(preview))
         .route("/api/v1/job/artifact/download", post(download_artifact))
@@ -123,9 +141,12 @@ pub fn openapi_document() -> serde_json::Value {
         "/api/v1/job/summary":{"get":{"summary":"Evidence-based summary","responses":{"200":{"description":"Summary"}}}},
         "/api/v1/job/sessions":{"get":{"summary":"Sessions","responses":{"200":{"description":"Sessions"}}}},
         "/api/v1/job/findings":{"get":{"summary":"Evidence-linked findings","responses":{"200":{"description":"Findings"}}}},
+        "/api/v1/job/query/findings":{"post":{"summary":"Body-based filtered findings query","responses":{"200":{"description":"Finding page"}}}},
         "/api/v1/job/applications":{"get":{"summary":"Applications","responses":{"200":{"description":"Applications"}}}},
+        "/api/v1/job/query/applications":{"post":{"summary":"Body-based filtered applications query","responses":{"200":{"description":"Application page"}}}},
         "/api/v1/job/attempts":{"get":{"summary":"Execution attempts","responses":{"200":{"description":"Attempts"}}}},
         "/api/v1/job/entities":{"get":{"summary":"Managed entities","responses":{"200":{"description":"Entities"}}}},
+        "/api/v1/job/query/entities":{"post":{"summary":"Body-based filtered managed-entity query","responses":{"200":{"description":"Entity page"}}}},
         "/api/v1/job/esp":{"get":{"summary":"ESP resources","responses":{"200":{"description":"ESP state"}}}},
         "/api/v1/job/provisioning":{"get":{"summary":"Provisioning steps","responses":{"200":{"description":"Steps"}}}},
         "/api/v1/job/coverage":{"get":{"summary":"Parser and collection coverage","responses":{"200":{"description":"Coverage records"}}}},
@@ -253,7 +274,9 @@ async fn receive_upload(state: &AppState, job: &Job, source: &str, body: Body) -
     drop(file);
     tokio::fs::rename(&partial, job.dir.join("upload.bin")).await?;
     tokio::fs::write(job.dir.join("source.name"), source.as_bytes()).await?;
-    Ok(format!("{:x}", hash.finalize()))
+    let digest = format!("{:x}", hash.finalize());
+    tokio::fs::write(job.dir.join("upload.sha256"), digest.as_bytes()).await?;
+    Ok(digest)
 }
 
 async fn job_state(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<JobView>> {
@@ -354,6 +377,39 @@ async fn timeline(
     let max = state.config().timeline_page_max;
     let page = query_db(job, move |conn| db::timeline(&conn, &query, default, max)).await?;
     Ok(Json(redaction::timeline(page, mode)))
+}
+async fn query_findings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(query): Json<FindingQuery>,
+) -> Result<Json<FindingPage>> {
+    let mode = redaction_mode(&headers);
+    let job = ready_job(&state, &headers).await?;
+    let max = state.config().timeline_page_max;
+    let page = query_db(job, move |conn| db::query_findings(&conn, &query, max)).await?;
+    Ok(Json(redaction::finding_page(page, mode)))
+}
+async fn query_applications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(query): Json<ApplicationQuery>,
+) -> Result<Json<ApplicationPage>> {
+    let mode = redaction_mode(&headers);
+    let job = ready_job(&state, &headers).await?;
+    let max = state.config().timeline_page_max;
+    let page = query_db(job, move |conn| db::query_applications(&conn, &query, max)).await?;
+    Ok(Json(redaction::application_page(page, mode)))
+}
+async fn query_entities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(query): Json<EntityQuery>,
+) -> Result<Json<EntityPage>> {
+    let mode = redaction_mode(&headers);
+    let job = ready_job(&state, &headers).await?;
+    let max = state.config().timeline_page_max;
+    let page = query_db(job, move |conn| db::query_entities(&conn, &query, max)).await?;
+    Ok(Json(redaction::entity_page(page, mode)))
 }
 async fn resolve_evidence(
     State(state): State<AppState>,

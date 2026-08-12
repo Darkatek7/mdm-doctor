@@ -28,6 +28,7 @@ pub struct Config {
     pub timeline_page_size: usize,
     pub timeline_page_max: usize,
     pub debug_sanitized: bool,
+    pub default_identifiers_visible: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -43,6 +44,7 @@ pub struct PublicLimits {
     pub max_active_jobs: usize,
     pub timeline_page_size: usize,
     pub timeline_page_max: usize,
+    pub default_identifiers_visible: bool,
 }
 
 impl Default for Config {
@@ -69,6 +71,7 @@ impl Default for Config {
             timeline_page_size: 100,
             timeline_page_max: 500,
             debug_sanitized: false,
+            default_identifiers_visible: true,
         }
     }
 }
@@ -101,6 +104,10 @@ impl Config {
         cfg.timeline_page_size = parse("TIMELINE_PAGE_SIZE", cfg.timeline_page_size)?;
         cfg.timeline_page_max = parse("TIMELINE_PAGE_MAX", cfg.timeline_page_max)?;
         cfg.debug_sanitized = parse("DEBUG_SANITIZED", cfg.debug_sanitized)?;
+        cfg.default_identifiers_visible = parse(
+            "DEFAULT_IDENTIFIERS_VISIBLE",
+            cfg.default_identifiers_visible,
+        )?;
 
         if cfg.job_ttl > Duration::from_secs(7_200) {
             return Err(AppError::config(
@@ -129,6 +136,7 @@ impl Config {
             max_active_jobs: self.max_active_jobs,
             timeline_page_size: self.timeline_page_size,
             timeline_page_max: self.timeline_page_max,
+            default_identifiers_visible: self.default_identifiers_visible,
         }
     }
 }

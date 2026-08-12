@@ -30,6 +30,10 @@ pub struct JobView {
     pub created_at: String,
     pub expires_at: String,
     pub can_reanalyze: bool,
+    pub processed_artifacts: Option<u64>,
+    pub total_artifacts: Option<u64>,
+    pub unique_events: Option<u64>,
+    pub duplicate_events: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -61,6 +65,36 @@ pub struct Summary {
     pub kpis: Kpis,
     pub latest_session_id: Option<String>,
     pub rule_pack: String,
+    pub overall_status: String,
+    pub primary_diagnosis: Option<PrimaryDiagnosis>,
+    pub health_checks: Vec<HealthCheck>,
+    pub finding_counts: FindingCounts,
+    pub coverage_warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct PrimaryDiagnosis {
+    pub title: String,
+    pub severity: String,
+    pub confidence: String,
+    pub affected_entity: Option<String>,
+    pub recommendation: String,
+    pub evidence_count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct HealthCheck {
+    pub key: String,
+    pub label: String,
+    pub state: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+pub struct FindingCounts {
+    pub current: u64,
+    pub historical: u64,
+    pub unknown: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -80,6 +114,9 @@ pub struct Finding {
     pub severity: String,
     pub confidence: String,
     pub current: bool,
+    pub temporal_scope: String,
+    pub occurrence_count: u64,
+    pub last_seen_at: Option<String>,
     pub esp_tracked: bool,
     pub entity_id: Option<String>,
     pub title: String,
@@ -211,6 +248,8 @@ pub struct TimelineEvent {
     pub entity_id: Option<String>,
     pub message: String,
     pub current: bool,
+    pub temporal_scope: String,
+    pub occurrence_count: u64,
     pub evidence_id: String,
 }
 
@@ -225,6 +264,7 @@ pub struct TimelineQuery {
     pub component: Option<Vec<String>>,
     pub session_id: Option<String>,
     pub since: Option<String>,
+    pub temporal_scope: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -232,6 +272,88 @@ pub struct TimelinePage {
     pub items: Vec<TimelineEvent>,
     pub next_cursor: Option<u64>,
     pub total_estimate: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+pub struct FindingQuery {
+    pub cursor: Option<u64>,
+    pub limit: Option<usize>,
+    pub search: Option<String>,
+    pub severity: Option<Vec<String>>,
+    pub confidence: Option<Vec<String>>,
+    pub temporal_scope: Option<Vec<String>>,
+    pub category: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct FindingPage {
+    pub items: Vec<Finding>,
+    pub next_cursor: Option<u64>,
+    pub total: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+pub struct ApplicationQuery {
+    pub cursor: Option<u64>,
+    pub limit: Option<usize>,
+    pub search: Option<String>,
+    pub state: Option<Vec<String>>,
+    pub app_type: Option<Vec<String>>,
+    pub esp_tracked: Option<bool>,
+    pub attempted: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct ApplicationSummary {
+    pub total: u64,
+    pub attempted: u64,
+    pub failed: u64,
+    pub succeeded: u64,
+    pub observed: u64,
+    pub esp_tracked: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct ApplicationPage {
+    pub items: Vec<Application>,
+    pub next_cursor: Option<u64>,
+    pub total: u64,
+    pub summary: ApplicationSummary,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+pub struct EntityQuery {
+    pub cursor: Option<u64>,
+    pub limit: Option<usize>,
+    pub search: Option<String>,
+    pub entity_type: Option<Vec<String>>,
+    pub state: Option<Vec<String>>,
+    pub current: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct EntityTypeCount {
+    pub entity_type: String,
+    pub count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct EntitySummary {
+    pub total: u64,
+    pub current: u64,
+    pub historical: u64,
+    pub failed: u64,
+    pub succeeded: u64,
+    pub observed: u64,
+    pub by_type: Vec<EntityTypeCount>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct EntityPage {
+    pub items: Vec<ManagedEntity>,
+    pub next_cursor: Option<u64>,
+    pub total: u64,
+    pub summary: EntitySummary,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

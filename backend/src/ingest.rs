@@ -26,6 +26,7 @@ pub struct ExtractedArtifact {
     pub object_path: PathBuf,
     pub normalized_path: String,
     pub detected_type: String,
+    pub duplicate_of: Option<String>,
 }
 
 #[derive(Debug)]
@@ -91,6 +92,7 @@ pub fn ingest_upload(
             object_path: upload_path.to_path_buf(),
             normalized_path: normalized_source,
             detected_type: outer_type.to_owned(),
+            duplicate_of: None,
         }],
         hashes: HashMap::new(),
         expanded_bytes: 0,
@@ -213,7 +215,8 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
             &original,
             &normalized,
         )?;
-        if let Some((object_path, artifact_id, detected_type)) = written
+        if let Some((object_path, artifact_id, detected_type, duplicate)) = written
+            && !duplicate
             && (detected_type == "zip" || detected_type == "cab")
         {
             extract_archive(ctx, &object_path, &artifact_id, &detected_type, layer + 1)?;
@@ -284,6 +287,7 @@ fn record_quarantined_member<R: Read>(
         object_path: ctx.job_dir.join("unavailable"),
         normalized_path: normalized.to_owned(),
         detected_type: "etl-unsupported".into(),
+        duplicate_of,
     });
     Ok(())
 }
@@ -380,7 +384,8 @@ fn extract_cab(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
             &original,
             &normalized,
         )?;
-        if let Some((object_path, artifact_id, detected_type)) = written
+        if let Some((object_path, artifact_id, detected_type, duplicate)) = written
+            && !duplicate
             && (detected_type == "zip" || detected_type == "cab")
         {
             extract_archive(ctx, &object_path, &artifact_id, &detected_type, layer + 1)?;
@@ -423,7 +428,7 @@ fn write_member<R: Read>(
     layer: u32,
     original: &str,
     normalized: &str,
-) -> Result<Option<(PathBuf, String, String)>> {
+) -> Result<Option<(PathBuf, String, String, bool)>> {
     ctx.file_count += 1;
     if ctx.file_count > ctx.config.max_archive_files {
         return Err(AppError::unsafe_archive("archive file count exceeded"));
@@ -497,8 +502,14 @@ fn write_member<R: Read>(
         object_path: effective_path.clone(),
         normalized_path: normalized.to_owned(),
         detected_type: detected_type.clone(),
+        duplicate_of: duplicate_of.clone(),
     });
-    Ok(Some((effective_path, id, detected_type)))
+    Ok(Some((
+        effective_path,
+        id,
+        detected_type,
+        duplicate_of.is_some(),
+    )))
 }
 
 pub fn normalize_member_path(raw: &str) -> Result<String> {
