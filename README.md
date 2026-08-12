@@ -76,8 +76,9 @@ VPN with host firewall rules in place.
 ### Start with the verdict
 
 MDM Doctor separates an observed error from a proven root cause. The overview
-shows the current verdict, confidence, coverage, first authoritative blocker,
-and the next action backed by linked evidence.
+shows a clear current verdict, the most likely cause, evidence caveats, separate
+current/unknown/historical counts, and a health matrix for identity, ESP,
+applications, policies, certificates/network, and data quality.
 
 <img src="docs/images/mdm-doctor-analysis-overview.jpg" alt="Evidence-based MDM Doctor analysis overview" width="100%">
 
@@ -121,7 +122,12 @@ lifecycle property, not an export option.
   exist only in a capability-scoped tmpfs directory.
 - Delete, cancellation, failure, timeout, TTL expiry, export failure, and
   graceful shutdown purge the whole job workspace.
-- Redaction defaults to on. Raw evidence requires an explicit reveal action;
+- Requests without a redaction header are always handled as redacted. The UI
+  default is configurable with `DEFAULT_IDENTIFIERS_VISIBLE` and remains only
+  in React memory; the included Compose default shows identifiers.
+- Operational application, package, policy, and profile display names remain
+  readable in redacted mode. Device, user, tenant, network, path, and source
+  identifiers stay masked. Raw evidence still requires an explicit reveal;
   unredacted exports require confirmation.
 - The service has no accounts, login, job listing, case history, audit history,
   access logs, telemetry, crash uploads, persistent metrics, or backups.
@@ -167,10 +173,27 @@ The defaults are intentionally conservative:
 | Workers / uploads / active jobs | 2 / 2 / 4 |
 | Job / parser timeout | 20 minutes / 120 seconds |
 | Idle TTL | 30 minutes |
+| Identifiers visible in a new UI session | `true` |
 
 Review [.env.example](.env.example) for every configurable limit. Global
 admission control prevents configured jobs from overcommitting the tmpfs
-budget.
+budget. Set `DEFAULT_IDENTIFIERS_VISIBLE=false` to start new browser sessions
+with masked identifiers; the operator can still change the memory-only switch.
+
+## Performance validation
+
+The release build was validated end to end against two local diagnostic bundles
+on the same reference workstation. Only sanitized aggregate measurements were
+recorded; no bundle data or identifiers entered the repository or build context.
+
+| Bundle class | Compressed | Analysis | Canonical events | Transient SQLite | Parser failures | Event limit |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Small | 34 MiB | 15.0 s | 149,515 | 158 MiB | 0 | No |
+| Large | 87 MiB | 62.9 s | 485,837 | 582 MiB | 0 | No |
+
+These figures are a regression reference, not a hardware-independent
+performance guarantee. Duplicate archive layers and repeated records retain
+provenance while being expanded, parsed, and indexed only once.
 
 ### Optional TLS proxy
 

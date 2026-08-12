@@ -23,6 +23,14 @@ struct Progress<'a> {
     phase: &'a str,
     percent: u8,
     stage: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    processed_artifacts: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_artifacts: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unique_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duplicate_events: Option<u64>,
 }
 
 pub fn run_worker(config: &Config, job_dir: &Path) -> Result<()> {
@@ -30,13 +38,26 @@ pub fn run_worker(config: &Config, job_dir: &Path) -> Result<()> {
     let source_name =
         fs::read_to_string(job_dir.join("source.name")).map_err(|_| AppError::BadRequest)?;
     let source_name = source_name.trim();
-    let upload_sha = hash_file(&upload)?;
+    let upload_sha = fs::read_to_string(job_dir.join("upload.sha256"))
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
+        .map_or_else(|| hash_file(&upload), Ok)?;
     let partial_db = job_dir.join("analysis.partial.sqlite");
     let final_db = job_dir.join(db::DB_FILE);
     let _ = fs::remove_file(&partial_db);
     let _ = fs::remove_file(&final_db);
     let _ = fs::remove_dir_all(job_dir.join("objects"));
-    progress(job_dir, "extracting", 20, "Validating archive")?;
+    progress(
+        job_dir,
+        "extracting",
+        20,
+        "Validating archive",
+        None,
+        None,
+        None,
+        None,
+    )?;
 
     let mut conn = db::open(&partial_db)?;
     db::initialize(&conn)?;
@@ -47,13 +68,61 @@ pub fn run_worker(config: &Config, job_dir: &Path) -> Result<()> {
         tx.commit()?;
         report
     };
-    progress(job_dir, "parsing", 50, "Parsing diagnostic sources")?;
-    {
+    let total_artifacts = report.artifacts.len() as u64;
+    progress(
+        job_dir,
+        "parsing",
+        35,
+        "Parsing diagnostic sources",
+        Some(0),
+        Some(total_artifacts),
+        Some(0),
+        Some(0),
+    )?;
+    let parse_stats = {
         let tx = conn.transaction()?;
-        parsers::parse_all(&tx, &report.artifacts, config)?;
+        let stats =
+            parsers::parse_all(&tx, &report.artifacts, config, |processed, total, stats| {
+                let percent = 35_u8
+                    .saturating_add(((processed.saturating_mul(43) / total.max(1)) as u8).min(43));
+                if processed == total || processed % 20 == 0 {
+                    progress(
+                        job_dir,
+                        "parsing",
+                        percent,
+                        "Parsing diagnostic sources",
+                        Some(processed),
+                        Some(total),
+                        Some(stats.unique_events),
+                        Some(stats.duplicate_events),
+                    )?;
+                }
+                Ok(())
+            })?;
         tx.commit()?;
-    }
-    progress(job_dir, "correlating", 82, "Correlating evidence")?;
+        stats
+    };
+    progress(
+        job_dir,
+        "parsing",
+        80,
+        "Building search index",
+        Some(total_artifacts),
+        Some(total_artifacts),
+        Some(parse_stats.unique_events),
+        Some(parse_stats.duplicate_events),
+    )?;
+    db::finalize_event_index(&conn)?;
+    progress(
+        job_dir,
+        "correlating",
+        86,
+        "Correlating evidence",
+        Some(total_artifacts),
+        Some(total_artifacts),
+        Some(parse_stats.unique_events),
+        Some(parse_stats.duplicate_events),
+    )?;
     {
         let tx = conn.transaction()?;
         correlate(&tx)?;
@@ -62,7 +131,16 @@ pub fn run_worker(config: &Config, job_dir: &Path) -> Result<()> {
     conn.execute("PRAGMA optimize", [])?;
     drop(conn);
     fs::rename(&partial_db, &final_db)?;
-    progress(job_dir, "ready", 100, "Analysis ready")?;
+    progress(
+        job_dir,
+        "ready",
+        100,
+        "Analysis ready",
+        Some(total_artifacts),
+        Some(total_artifacts),
+        Some(parse_stats.unique_events),
+        Some(parse_stats.duplicate_events),
+    )?;
     Ok(())
 }
 
@@ -70,6 +148,7 @@ fn correlate(conn: &Connection) -> Result<()> {
     build_sessions(conn)?;
     build_device_snapshot(conn)?;
     build_applications_and_attempts(conn)?;
+    build_named_managed_entities(conn)?;
     build_esp(conn)?;
     evaluate_msi_transactions(conn)?;
     evaluate_unmapped_exits(conn)?;
@@ -117,7 +196,7 @@ fn build_sessions(conn: &Connection) -> Result<()> {
             },
         )?;
         conn.execute(
-            "UPDATE events SET current=1, session_id=?1",
+            "UPDATE events SET current=0, temporal_scope='unknown', session_id=?1",
             [stable_id("session", "undated")],
         )?;
         return Ok(());
@@ -167,17 +246,17 @@ fn build_sessions(conn: &Connection) -> Result<()> {
         )?;
         if current {
             conn.execute(
-                "UPDATE events SET current=1,session_id=?1 WHERE timestamp_utc>=?2",
+                "UPDATE events SET current=1,temporal_scope='current',session_id=?1 WHERE timestamp_utc>=?2",
                 params![id, start],
             )?;
         } else if let Some(end) = end {
             conn.execute(
-                "UPDATE events SET session_id=?1 WHERE timestamp_utc>=?2 AND timestamp_utc<?3",
+                "UPDATE events SET current=0,temporal_scope='historical',session_id=?1 WHERE timestamp_utc>=?2 AND timestamp_utc<?3",
                 params![id, start, end],
             )?;
         }
     }
-    conn.execute("UPDATE events SET current=1,session_id=(SELECT id FROM sessions WHERE current=1 LIMIT 1) WHERE timestamp_utc IS NULL",[])?;
+    conn.execute("UPDATE events SET current=0,temporal_scope='unknown',session_id=NULL WHERE timestamp_utc IS NULL",[])?;
     Ok(())
 }
 
@@ -213,6 +292,8 @@ fn build_device_snapshot(conn: &Connection) -> Result<()> {
 fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
     static GUID: OnceLock<Regex> = OnceLock::new();
     static EXIT: OnceLock<Regex> = OnceLock::new();
+    static NAME: OnceLock<Regex> = OnceLock::new();
+    static APP_ID: OnceLock<Regex> = OnceLock::new();
     let guid = GUID.get_or_init(|| {
         Regex::new(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
             .expect("static regex")
@@ -221,93 +302,201 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
         Regex::new(r"(?i)(?:exit(?:ed)?(?:\s+with)?(?:\s+code)?|return\s+code)\D{0,12}(-?\d{1,10})")
             .expect("static regex")
     });
-    let mut stmt=conn.prepare("SELECT id,timestamp_utc,message,current FROM events WHERE lower(message) LIKE '%app%' OR lower(message) LIKE '%msi%' OR lower(message) LIKE '%installer%' OR lower(message) LIKE '%exit code%' ORDER BY sequence")?;
-    let rows: Vec<(String, Option<String>, String, bool)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+    let name = NAME.get_or_init(|| Regex::new(r#"(?i)[\"']?(?:app(?:lication)?(?:\s+display)?\s*name|displayname|productname)[\"']?\s*[:=]\s*[\"']?([^\"'\r\n,;}\]]{2,160})"#).expect("static regex"));
+    let app_id = APP_ID.get_or_init(|| Regex::new(r#"(?i)(?:app(?:lication)?(?:\s+policy)?(?:\s+with)?\s+id|applicationid|applicatonid|app_id)[\"']?\s*[:=]\s*[\"']?([0-9a-f]{8}-[0-9a-f-]{27,36})"#).expect("static regex"));
+    #[derive(Clone)]
+    struct Row {
+        event_id: String,
+        artifact_id: String,
+        timestamp: Option<String>,
+        message: String,
+        current: bool,
+        component: Option<String>,
+        path: String,
+        sequence: u64,
+    }
+    let mut stmt=conn.prepare("SELECT e.id,e.artifact_id,e.timestamp_utc,e.message,e.current,e.component,a.normalized_path,e.sequence FROM events e JOIN artifacts a ON a.id=e.artifact_id WHERE lower(a.normalized_path) LIKE '%intunemanagementextension%' OR lower(a.normalized_path) LIKE '%appworkload%' OR lower(a.normalized_path) LIKE '%agentexecutor%' OR lower(a.normalized_path) LIKE '%esptracking%' OR lower(a.normalized_path) LIKE '%enrollmentstatustracking%' OR lower(COALESCE(e.component,'')) IN ('intunemanagementextension','appworkload','appactionprocessor','agentexecutor','msiinstaller') ORDER BY e.sequence")?;
+    let rows: Vec<Row> = stmt
+        .query_map([], |r| {
+            Ok(Row {
+                event_id: r.get(0)?,
+                artifact_id: r.get(1)?,
+                timestamp: r.get(2)?,
+                message: r.get(3)?,
+                current: r.get(4)?,
+                component: r.get(5)?,
+                path: r.get(6)?,
+                sequence: r.get::<_, i64>(7)? as u64,
+            })
+        })?
         .collect::<rusqlite::Result<_>>()?;
-    let mut tracked_apps = std::collections::HashSet::new();
-    let mut generic_tracked = false;
-    let mut tracked_stmt=conn.prepare("SELECT e.message FROM events e JOIN artifacts a ON a.id=e.artifact_id WHERE lower(a.normalized_path) LIKE '%esptracking%' OR lower(a.normalized_path) LIKE '%enrollmentstatustracking%'")?;
-    let tracked_messages = tracked_stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    for message in tracked_messages {
-        let mut matched = false;
-        for value in guid.find_iter(&message) {
-            tracked_apps.insert(stable_id("app", &value.as_str().to_ascii_lowercase()));
-            matched = true;
-        }
-        generic_tracked |= !matched && message.to_ascii_lowercase().contains("app");
+    #[derive(Default)]
+    struct AppBuild {
+        name: Option<String>,
+        evidence: std::collections::BTreeSet<String>,
+        attempts: u64,
+        current: bool,
+        tracked: bool,
+        state: String,
+        latest_sequence: u64,
+        app_type: String,
     }
-    let mut apps = std::collections::BTreeMap::<
-        String,
-        (String, Vec<String>, u64, bool, Option<(String, bool)>),
-    >::new();
-    for (event_id, timestamp, message, current) in &rows {
-        let key = guid
-            .find(message)
-            .map(|m| m.as_str().to_ascii_lowercase())
-            .unwrap_or_else(|| "generic-win32".into());
-        let app_id = stable_id("app", &key);
-        let evidence = evidence_for_event(conn, event_id)?
-            .map(|e| e.id)
-            .unwrap_or_default();
-        let item = apps
-            .entry(app_id.clone())
-            .or_insert((key.clone(), Vec::new(), 0, false, None));
-        if !evidence.is_empty() {
-            item.1.push(evidence.clone());
+    let explicit_name = |message: &str| -> Option<String> {
+        let raw = name
+            .captures(message)?
+            .get(1)?
+            .as_str()
+            .trim()
+            .trim_matches(['"', '\''])
+            .to_owned();
+        let lower = raw.to_ascii_lowercase();
+        (!guid.is_match(&raw)
+            && !matches!(lower.as_str(), "application" | "app" | "unknown" | "null")
+            && raw.len() >= 2)
+            .then_some(raw)
+    };
+    let mut name_by_key = std::collections::HashMap::<String, String>::new();
+    for row in &rows {
+        for (key, display) in app_descriptors(&row.message, guid) {
+            name_by_key.entry(key).or_insert(display);
         }
-        item.3 |= *current;
-        if let Some(caps) = exit.captures(message) {
-            let code = caps.get(1).and_then(|m| m.as_str().parse::<i64>().ok());
-            item.2 += 1;
-            let state = match code {
-                Some(0 | 3010 | 1641) => "succeeded",
-                Some(_) => "failed",
-                None => "unknown",
+        if let (Some(key), Some(display)) = (
+            app_id
+                .captures(&row.message)
+                .and_then(|captures| captures.get(1))
+                .map(|value| value.as_str().to_ascii_lowercase()),
+            explicit_name(&row.message),
+        ) {
+            name_by_key.entry(key).or_insert(display);
+        }
+    }
+    let mut apps = std::collections::BTreeMap::<String, AppBuild>::new();
+    let mut last_app = std::collections::HashMap::<String, String>::new();
+    for row in &rows {
+        let lower = row.message.to_ascii_lowercase();
+        let tracking = row.path.to_ascii_lowercase().contains("esptracking")
+            || row
+                .path
+                .to_ascii_lowercase()
+                .contains("enrollmentstatustracking");
+        let lifecycle = tracking
+            || [
+                "app id",
+                "application id",
+                "detection",
+                "install",
+                "uninstall",
+                "exit code",
+                "return code",
+                "applicability",
+            ]
+            .iter()
+            .any(|needle| lower.contains(needle));
+        if !lifecycle {
+            continue;
+        }
+        let mut keys = app_id
+            .captures_iter(&row.message)
+            .filter_map(|captures| captures.get(1))
+            .map(|value| value.as_str().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        keys.extend(
+            app_descriptors(&row.message, guid)
+                .into_iter()
+                .map(|(key, _)| key),
+        );
+        let display = explicit_name(&row.message);
+        if keys.is_empty() {
+            if let Some(display) = &display {
+                keys.push(format!("name:{}", display.to_ascii_lowercase()));
+            } else if let Some(previous) = last_app.get(&row.artifact_id) {
+                keys.push(previous.clone());
+            } else if exit.is_match(&row.message) {
+                keys.push(format!("artifact:{}", row.artifact_id));
+            }
+        }
+        keys.sort();
+        keys.dedup();
+        let evidence = evidence_for_event(conn, &row.event_id)?.map(|value| value.id);
+        for key in keys {
+            let app_id = stable_id("app", &key);
+            last_app.insert(row.artifact_id.clone(), key.clone());
+            let item = apps.entry(app_id.clone()).or_default();
+            item.name = item
+                .name
+                .take()
+                .or_else(|| display.clone())
+                .or_else(|| name_by_key.get(&key).cloned());
+            item.current |= row.current;
+            item.tracked |= tracking;
+            item.app_type = if row
+                .component
+                .as_deref()
+                .is_some_and(|v| v.eq_ignore_ascii_case("MsiInstaller"))
+            {
+                "MSI".into()
+            } else {
+                "Managed".into()
             };
-            item.4 = Some((state.into(), *current));
-            let attempt_id = stable_id("attempt", &format!("{app_id}:{event_id}"));
-            db::insert_attempt(
-                conn,
-                &ExecutionAttempt {
-                    id: attempt_id,
-                    application_id: Some(app_id.clone()),
-                    started_at: timestamp.clone(),
-                    ended_at: timestamp.clone(),
-                    exit_code: code,
-                    detection_result: None,
-                    reboot_during_attempt: false,
-                    state: state.into(),
-                    evidence_ids: if evidence.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![evidence]
+            if let Some(evidence) = &evidence
+                && item.evidence.len() < 100
+            {
+                item.evidence.insert(evidence.clone());
+            }
+            if let Some(caps) = exit.captures(&row.message) {
+                let code = caps
+                    .get(1)
+                    .and_then(|value| value.as_str().parse::<i64>().ok());
+                let state = match code {
+                    Some(0 | 3010 | 1641) => "succeeded",
+                    Some(_) => "failed",
+                    None => "unknown",
+                };
+                item.attempts += 1;
+                if row.sequence >= item.latest_sequence {
+                    item.latest_sequence = row.sequence;
+                    item.state = state.into();
+                }
+                db::insert_attempt(
+                    conn,
+                    &ExecutionAttempt {
+                        id: stable_id("attempt", &format!("{app_id}:{}", row.event_id)),
+                        application_id: Some(app_id.clone()),
+                        started_at: row.timestamp.clone(),
+                        ended_at: row.timestamp.clone(),
+                        exit_code: code,
+                        detection_result: None,
+                        reboot_during_attempt: false,
+                        state: state.into(),
+                        evidence_ids: evidence.clone().into_iter().collect(),
                     },
-                },
-            )?;
+                )?;
+            }
         }
     }
-    for (id, (name, evidence, attempt_count, observed_current, latest)) in apps {
-        let (state, current) = latest.unwrap_or_else(|| ("observed".into(), observed_current));
-        let tracked = tracked_apps.contains(&id) || (name == "generic-win32" && generic_tracked);
+    for (id, item) in apps {
+        let state = if item.state.is_empty() {
+            "observed".into()
+        } else {
+            item.state
+        };
+        let display_name = item.name.unwrap_or_else(|| "Unknown application".into());
+        let evidence = item.evidence.into_iter().collect::<Vec<_>>();
         db::insert_application(
             conn,
             &Application {
                 id: id.clone(),
-                name: name.clone(),
-                app_type: if name == "generic-win32" {
-                    "Win32"
+                name: display_name.clone(),
+                app_type: if item.app_type.is_empty() {
+                    "Managed".into()
                 } else {
-                    "Managed"
-                }
-                .into(),
+                    item.app_type
+                },
                 intent: None,
                 install_context: None,
                 state: state.clone(),
-                esp_tracked: tracked,
-                attempt_count,
+                esp_tracked: item.tracked,
+                attempt_count: item.attempts,
                 evidence_ids: evidence.clone(),
             },
         )?;
@@ -316,14 +505,200 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
             &ManagedEntity {
                 id,
                 entity_type: "application".into(),
-                name,
+                name: display_name,
                 state,
-                current,
+                current: item.current,
                 evidence_ids: evidence,
             },
         )?;
     }
     Ok(())
+}
+
+fn app_descriptors(message: &str, guid: &Regex) -> Vec<(String, String)> {
+    let Some(start) = message.find("[{").or_else(|| message.find('{')) else {
+        return Vec::new();
+    };
+    let Some(Ok(value)) = serde_json::Deserializer::from_str(&message[start..])
+        .into_iter::<serde_json::Value>()
+        .next()
+    else {
+        return Vec::new();
+    };
+    fn walk(value: &serde_json::Value, guid: &Regex, out: &mut Vec<(String, String)>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                let id = map.iter().find_map(|(key, value)| {
+                    matches!(
+                        key.to_ascii_lowercase().as_str(),
+                        "id" | "applicationid" | "applicatonid" | "app_id"
+                    )
+                    .then(|| value.as_str())
+                    .flatten()
+                    .filter(|raw| guid.is_match(raw))
+                });
+                let name = map.iter().find_map(|(key, value)| {
+                    matches!(
+                        key.to_ascii_lowercase().as_str(),
+                        "name" | "displayname" | "applicationname" | "productname"
+                    )
+                    .then(|| value.as_str())
+                    .flatten()
+                    .map(str::trim)
+                    .filter(|raw| raw.len() >= 2 && !guid.is_match(raw))
+                });
+                if let Some((id, name)) = id.zip(name) {
+                    out.push((id.to_ascii_lowercase(), name.to_owned()));
+                }
+                for child in map.values() {
+                    walk(child, guid, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for child in items {
+                    walk(child, guid, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&value, guid, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn build_named_managed_entities(conn: &Connection) -> Result<()> {
+    static TYPED_NAME: OnceLock<Regex> = OnceLock::new();
+    static DISPLAY_NAME: OnceLock<Regex> = OnceLock::new();
+    static GUID: OnceLock<Regex> = OnceLock::new();
+    let typed_name = TYPED_NAME.get_or_init(|| {
+        Regex::new(r#"(?i)(policy|profile|package|certificate|network)(?:\s+display)?\s*name[\"']?\s*[:=]\s*[\"']?([^\"'\r\n,;}\]]{2,160})"#)
+            .expect("static regex")
+    });
+    let display_name = DISPLAY_NAME.get_or_init(|| {
+        Regex::new(r#"(?i)[\"']?displayname[\"']?\s*[:=]\s*[\"']([^\"'\r\n]{2,160})"#)
+            .expect("static regex")
+    });
+    let guid = GUID.get_or_init(|| {
+        Regex::new(r"(?i)^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$")
+            .expect("static regex")
+    });
+    let mut stmt = conn.prepare(
+        "SELECT e.id,e.message,e.current,a.normalized_path FROM events e JOIN artifacts a ON a.id=e.artifact_id WHERE lower(e.message) LIKE '%policy%' OR lower(e.message) LIKE '%profile%' OR lower(e.message) LIKE '%package%' OR lower(e.message) LIKE '%certificate%' OR lower(e.message) LIKE '%scep%' OR lower(a.normalized_path) LIKE '%policy%' OR lower(a.normalized_path) LIKE '%profile%' OR lower(a.normalized_path) LIKE '%certificate%' OR lower(a.normalized_path) LIKE '%scep%' ORDER BY e.sequence",
+    )?;
+    let rows: Vec<(String, String, bool, String)> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    #[derive(Default)]
+    struct EntityBuild {
+        current: bool,
+        state: String,
+        evidence: std::collections::BTreeSet<String>,
+    }
+    let mut entities = std::collections::BTreeMap::<(String, String), EntityBuild>::new();
+    for (event_id, message, current, path) in rows {
+        let lower = message.to_ascii_lowercase();
+        let inferred_type = infer_entity_type(&lower, &path);
+        let named = typed_name
+            .captures_iter(&message)
+            .filter_map(|captures| {
+                Some((
+                    normalize_entity_type(captures.get(1)?.as_str()).to_owned(),
+                    captures.get(2)?.as_str(),
+                ))
+            })
+            .chain(display_name.captures_iter(&message).filter_map(|captures| {
+                Some((inferred_type?.to_owned(), captures.get(1)?.as_str()))
+            }));
+        for (entity_type, raw_name) in named {
+            let mut name = raw_name
+                .trim()
+                .trim_matches(['"', '\'', ' ', '.'])
+                .to_owned();
+            let normalized_name = name.to_ascii_lowercase();
+            for suffix in [
+                " applied successfully",
+                " applied",
+                " completed",
+                " succeeded",
+                " observed",
+                " failed",
+            ] {
+                if normalized_name.ends_with(suffix) {
+                    name.truncate(name.len() - suffix.len());
+                    break;
+                }
+            }
+            if name.len() < 2 || guid.is_match(&name) {
+                continue;
+            }
+            let key = (entity_type, name);
+            let entity = entities.entry(key).or_default();
+            entity.current |= current;
+            entity.state = if lower.contains("fail") || lower.contains("error") {
+                "failed"
+            } else if lower.contains("success")
+                || lower.contains("applied")
+                || lower.contains("complete")
+            {
+                "succeeded"
+            } else {
+                "observed"
+            }
+            .into();
+            if entity.evidence.len() < 20 {
+                entity.evidence.insert(format!("evidence:{event_id}"));
+            }
+        }
+    }
+    for ((entity_type, name), entity) in entities {
+        db::insert_entity(
+            conn,
+            &ManagedEntity {
+                id: stable_id(
+                    "entity",
+                    &format!("{}:{}", entity_type, name.to_ascii_lowercase()),
+                ),
+                entity_type,
+                name,
+                state: entity.state,
+                current: entity.current,
+                evidence_ids: entity.evidence.into_iter().collect(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn infer_entity_type<'a>(message: &str, path: &str) -> Option<&'a str> {
+    let context = format!("{} {}", message, path.to_ascii_lowercase());
+    if context.contains("certificate") || context.contains("scep") {
+        Some("certificate")
+    } else if context.contains("package") {
+        Some("package")
+    } else if context.contains("network") || context.contains("wifi") || context.contains("vpn") {
+        Some("network profile")
+    } else if context.contains("profile") {
+        Some("profile")
+    } else if context.contains("policy") {
+        Some("policy")
+    } else {
+        None
+    }
+}
+
+fn normalize_entity_type(value: &str) -> &str {
+    match value.to_ascii_lowercase().as_str() {
+        "network" => "network profile",
+        "certificate" => "certificate",
+        "package" => "package",
+        "profile" => "profile",
+        _ => "policy",
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -481,19 +856,33 @@ fn evaluate_msi_transactions(conn: &Connection) -> Result<()> {
 }
 
 fn evaluate_unmapped_exits(conn: &Connection) -> Result<()> {
-    let mut stmt=conn.prepare("SELECT x.id,x.exit_code,x.application_id,COALESCE(e.current,0) FROM execution_attempts x LEFT JOIN evidence_links l ON l.id=json_extract(x.evidence_ids,'$[0]') LEFT JOIN events e ON e.id=l.event_id WHERE x.exit_code IS NOT NULL AND x.exit_code NOT IN (0,3010,1641,1603,1618)")?;
-    let rows: Vec<(String, i64, Option<String>, bool)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+    let mut stmt=conn.prepare("SELECT x.id,x.exit_code,x.application_id,COALESCE(e.temporal_scope,'unknown'),e.timestamp_utc FROM execution_attempts x LEFT JOIN evidence_links l ON l.id=json_extract(x.evidence_ids,'$[0]') LEFT JOIN events e ON e.id=COALESCE(l.event_id,CASE WHEN json_extract(x.evidence_ids,'$[0]') LIKE 'evidence:event:%' THEN substr(json_extract(x.evidence_ids,'$[0]'),10) END) WHERE x.exit_code IS NOT NULL AND x.exit_code NOT IN (0,3010,1641) AND x.application_id IS NOT NULL")?;
+    let rows: Vec<(String, i64, String, String, Option<String>)> = stmt
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
         .collect::<rusqlite::Result<_>>()?;
-    for (attempt, code, app, current) in rows {
-        let tracked = app.as_deref().is_some_and(|id| {
-            conn.query_row(
+    #[derive(Default)]
+    struct Group {
+        count: u64,
+        evidence: Vec<EvidenceLink>,
+        tracked: bool,
+        last_seen: Option<String>,
+    }
+    let mut groups = std::collections::BTreeMap::<(String, i64, String), Group>::new();
+    for (attempt, code, app, scope, timestamp) in rows {
+        let group = groups.entry((app.clone(), code, scope)).or_default();
+        group.count += 1;
+        group.tracked = conn
+            .query_row(
                 "SELECT esp_tracked FROM applications WHERE id=?1",
-                [id],
+                [&app],
                 |r| r.get::<_, bool>(0),
             )
-            .unwrap_or(false)
-        });
+            .unwrap_or(false);
+        if timestamp > group.last_seen {
+            group.last_seen = timestamp;
+        }
         let evidence_ids: String = conn.query_row(
             "SELECT evidence_ids FROM execution_attempts WHERE id=?1",
             [&attempt],
@@ -503,22 +892,51 @@ fn evaluate_unmapped_exits(conn: &Connection) -> Result<()> {
             .unwrap_or_default()
             .into_iter()
             .filter_map(|id| evidence_by_id(conn, &id).ok().flatten())
-            .collect();
-        insert_finding(
-            conn,
-            "ime.app.unmapped-exit.v1",
-            "medium",
-            "high",
-            current,
-            tracked,
-            app,
-            "Application returned an unmapped exit code",
-            &format!(
-                "An application attempt returned code {code}. The application failure is actionable; ESP impact is {} by the available tracking evidence.",
-                if tracked { "proven" } else { "not proven" }
+            .collect::<Vec<_>>();
+        for value in evidence {
+            if group.evidence.len() < 10 && !group.evidence.iter().any(|e| e.id == value.id) {
+                group.evidence.push(value);
+            }
+        }
+    }
+    for ((app, code, scope), group) in groups {
+        let (rule, severity, title, explanation, recommendation) = match code {
+            1603 => (
+                "ime.app.msi-1603.v1",
+                "high",
+                "MSI installation returned fatal error 1603",
+                "A recognized application attempt returned MSI code 1603. ESP impact is reported only when authoritative tracking links the application.",
+                "Inspect the linked MSI log and installer prerequisites before retrying the application.",
             ),
-            "Map the return code only after verifying the installer's documented semantics and the linked detection result.",
-            evidence,
+            1618 => (
+                "ime.app.msi-1618.v1",
+                "medium",
+                "Another MSI installation was already running",
+                "A recognized application attempt returned MSI code 1618, indicating installer contention rather than an application-content diagnosis.",
+                "Wait for Windows Installer to become idle, confirm the competing transaction, and retry the application.",
+            ),
+            _ => (
+                "ime.app.unmapped-exit.v1",
+                "medium",
+                "Application returned an unmapped exit code",
+                "A recognized application attempt returned a code without a built-in semantic mapping. ESP impact is reported only when authoritative tracking links the application.",
+                "Verify the installer's documented return-code semantics and the linked detection result before retrying.",
+            ),
+        };
+        insert_finding_occurrences(
+            conn,
+            rule,
+            severity,
+            "high",
+            scope == "current",
+            group.tracked,
+            Some(app.clone()),
+            title,
+            explanation,
+            recommendation,
+            group.evidence,
+            group.count,
+            Some(&format!("{app}:{code}:{scope}")),
         )?;
     }
     Ok(())
@@ -649,19 +1067,83 @@ fn insert_finding(
     recommendation: &str,
     evidence: Vec<EvidenceLink>,
 ) -> Result<()> {
+    insert_finding_occurrences(
+        conn,
+        rule_id,
+        severity,
+        confidence,
+        current,
+        esp_tracked,
+        entity_id,
+        title,
+        explanation,
+        recommendation,
+        evidence,
+        1,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_finding_occurrences(
+    conn: &Connection,
+    rule_id: &str,
+    severity: &str,
+    confidence: &str,
+    current: bool,
+    esp_tracked: bool,
+    entity_id: Option<String>,
+    title: &str,
+    explanation: &str,
+    recommendation: &str,
+    evidence: Vec<EvidenceLink>,
+    occurrence_count: u64,
+    group_key: Option<&str>,
+) -> Result<()> {
     let evidence_key = evidence
         .iter()
         .map(|e| e.id.as_str())
         .collect::<Vec<_>>()
         .join(":");
-    let id = stable_id("finding", &format!("{rule_id}:{evidence_key}"));
+    let id = stable_id(
+        "finding",
+        &format!("{rule_id}:{}", group_key.unwrap_or(&evidence_key)),
+    );
+    let mut scopes = Vec::new();
+    let mut last_seen_at: Option<String> = None;
+    for item in &evidence {
+        if let Some(event_id) = &item.event_id
+            && let Some((scope, timestamp)) = conn
+                .query_row(
+                    "SELECT temporal_scope,timestamp_utc FROM events WHERE id=?1",
+                    [event_id],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                )
+                .optional()?
+        {
+            scopes.push(scope);
+            if timestamp > last_seen_at {
+                last_seen_at = timestamp;
+            }
+        }
+    }
+    let temporal_scope = if current || scopes.iter().any(|scope| scope == "current") {
+        "current"
+    } else if scopes.iter().any(|scope| scope == "unknown") || scopes.is_empty() {
+        "unknown"
+    } else {
+        "historical"
+    };
     let finding = Finding {
         id: id.clone(),
         rule_id: rule_id.into(),
         rule_pack: RULE_PACK_VERSION.into(),
         severity: severity.into(),
         confidence: confidence.into(),
-        current,
+        current: temporal_scope == "current",
+        temporal_scope: temporal_scope.into(),
+        occurrence_count,
+        last_seen_at,
         esp_tracked,
         entity_id,
         title: title.into(),
@@ -685,9 +1167,12 @@ fn insert_finding(
 }
 
 fn evidence_for_event(conn: &Connection, event_id: &str) -> Result<Option<EvidenceLink>> {
-    conn.query_row("SELECT id,artifact_id,event_id,source_span,label FROM evidence_links WHERE event_id=?1 ORDER BY id LIMIT 1",[event_id],|r|Ok(EvidenceLink{id:r.get(0)?,artifact_id:r.get(1)?,event_id:r.get(2)?,source_span:r.get(3)?,label:r.get(4)?})).optional().map_err(Into::into)
+    conn.query_row("SELECT artifact_id,id,source_span,COALESCE(component,provider,'source')||' evidence' FROM events WHERE id=?1",[event_id],|r|Ok(EvidenceLink{id:format!("evidence:{event_id}"),artifact_id:r.get(0)?,event_id:Some(r.get(1)?),source_span:r.get(2)?,label:r.get(3)?})).optional().map_err(Into::into)
 }
 fn evidence_by_id(conn: &Connection, id: &str) -> Result<Option<EvidenceLink>> {
+    if let Some(event_id) = id.strip_prefix("evidence:") {
+        return evidence_for_event(conn, event_id);
+    }
     conn.query_row(
         "SELECT id,artifact_id,event_id,source_span,label FROM evidence_links WHERE id=?1",
         [id],
@@ -738,11 +1223,25 @@ fn hash_file(path: &Path) -> Result<String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-fn progress(job_dir: &Path, phase: &str, percent: u8, stage: &str) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn progress(
+    job_dir: &Path,
+    phase: &str,
+    percent: u8,
+    stage: &str,
+    processed_artifacts: Option<u64>,
+    total_artifacts: Option<u64>,
+    unique_events: Option<u64>,
+    duplicate_events: Option<u64>,
+) -> Result<()> {
     let body = serde_json::to_vec(&Progress {
         phase,
         percent,
         stage,
+        processed_artifacts,
+        total_artifacts,
+        unique_events,
+        duplicate_events,
     })?;
     let temp = job_dir.join("progress.tmp");
     fs::write(&temp, body)?;
@@ -855,6 +1354,124 @@ mod tests {
             )
             .unwrap();
         assert_eq!(unresolved, 0);
+    }
+
+    #[test]
+    fn resolves_display_name_and_aggregates_current_attempt_failures() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        let app_id = "11111111-2222-3333-4444-555555555555";
+        for (key, time) in [
+            ("attempt-1", "2026-08-12T09:00:00+00:00"),
+            ("attempt-2", "2026-08-12T09:01:00+00:00"),
+        ] {
+            event(
+                &conn,
+                key,
+                Some(time),
+                Some("IntuneManagementExtension"),
+                None,
+                Some("machine"),
+                &format!(
+                    "application id: {app_id}, application name: Contoso Secure Client, installer exit code 1603"
+                ),
+            );
+        }
+        correlate(&conn).unwrap();
+
+        let application: (String, i64) = conn
+            .query_row("SELECT name,attempt_count FROM applications", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(application, ("Contoso Secure Client".into(), 2));
+        let finding: (String, i64) = conn
+            .query_row(
+                "SELECT temporal_scope,occurrence_count FROM findings WHERE rule_id='ime.app.msi-1603.v1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(finding, ("current".into(), 2));
+    }
+
+    #[test]
+    fn undated_application_failure_is_unknown_not_current() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        event(
+            &conn,
+            "undated-attempt",
+            None,
+            Some("IntuneManagementExtension"),
+            None,
+            Some("machine"),
+            "application name: Fabrikam Support Tool, installer exit code 1",
+        );
+        correlate(&conn).unwrap();
+
+        let finding: (String, bool) = conn
+            .query_row(
+                "SELECT temporal_scope,current FROM findings WHERE rule_id='ime.app.unmapped-exit.v1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(finding, ("unknown".into(), false));
+    }
+
+    #[test]
+    fn resolves_policy_package_and_profile_display_names() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "MDMDiagnosticReport.xml",
+        );
+        event(
+            &conn,
+            "policy",
+            Some("2026-08-12T09:00:00+00:00"),
+            Some("PolicyManager"),
+            None,
+            Some("machine"),
+            "Policy name: Windows Security Baseline applied successfully",
+        );
+        event(
+            &conn,
+            "profile",
+            Some("2026-08-12T09:01:00+00:00"),
+            Some("PolicyManager"),
+            None,
+            Some("machine"),
+            r#"Network profile payload {"displayName":"Corporate Wi-Fi"} completed"#,
+        );
+        event(
+            &conn,
+            "package",
+            Some("2026-08-12T09:02:00+00:00"),
+            Some("PolicyManager"),
+            None,
+            Some("machine"),
+            "Package name: Support Tools observed",
+        );
+        correlate(&conn).unwrap();
+
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM managed_entities ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(names.iter().any(|name| name.contains("Corporate Wi-Fi")));
+        assert!(names.iter().any(|name| name == "Support Tools"));
+        assert!(names.iter().any(|name| name == "Windows Security Baseline"));
     }
 
     #[test]

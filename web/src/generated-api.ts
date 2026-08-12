@@ -12,6 +12,19 @@ export type Application = {
   "state": string;
 };
 
+export type ApplicationPage = {
+  "items": Array<Application>;
+  "next_cursor"?: number | null;
+  "total": number;
+};
+
+export type ApplicationQuery = {
+  "cursor"?: number | null;
+  "limit"?: number | null;
+  "search"?: string | null;
+  "state"?: Array<string> | null;
+};
+
 export type Artifact = {
   "detected_type": string;
   "duplicate_of"?: string | null;
@@ -58,6 +71,20 @@ export type CoverageRecord = {
   "result_code"?: string | null;
   "source": string;
   "state": string;
+};
+
+export type EntityPage = {
+  "items": Array<ManagedEntity>;
+  "next_cursor"?: number | null;
+  "total": number;
+};
+
+export type EntityQuery = {
+  "cursor"?: number | null;
+  "entity_type"?: Array<string> | null;
+  "limit"?: number | null;
+  "search"?: string | null;
+  "state"?: Array<string> | null;
 };
 
 export type ErrorBody = {
@@ -118,11 +145,43 @@ export type Finding = {
   "evidence": Array<EvidenceLink>;
   "explanation": string;
   "id": string;
+  "last_seen_at"?: string | null;
+  "occurrence_count": number;
   "recommendation": string;
   "rule_id": string;
   "rule_pack": string;
   "severity": string;
+  "temporal_scope": string;
   "title": string;
+};
+
+export type FindingCounts = {
+  "current": number;
+  "historical": number;
+  "unknown": number;
+};
+
+export type FindingPage = {
+  "items": Array<Finding>;
+  "next_cursor"?: number | null;
+  "total": number;
+};
+
+export type FindingQuery = {
+  "category"?: Array<string> | null;
+  "confidence"?: Array<string> | null;
+  "cursor"?: number | null;
+  "limit"?: number | null;
+  "search"?: string | null;
+  "severity"?: Array<string> | null;
+  "temporal_scope"?: Array<string> | null;
+};
+
+export type HealthCheck = {
+  "detail": string;
+  "key": string;
+  "label": string;
+  "state": string;
 };
 
 export type HealthResponse = {
@@ -134,10 +193,14 @@ export type JobPhase = "uploading" | "queued" | "extracting" | "parsing" | "corr
 export type JobView = {
   "can_reanalyze": boolean;
   "created_at": string;
+  "duplicate_events"?: number | null;
   "expires_at": string;
   "phase": JobPhase;
+  "processed_artifacts"?: number | null;
   "progress_percent": number;
   "stage": string;
+  "total_artifacts"?: number | null;
+  "unique_events"?: number | null;
 };
 
 export type Kpis = {
@@ -171,6 +234,15 @@ export type PreviewResponse = {
   "truncated": boolean;
 };
 
+export type PrimaryDiagnosis = {
+  "affected_entity"?: string | null;
+  "confidence": string;
+  "evidence_count": number;
+  "recommendation": string;
+  "severity": string;
+  "title": string;
+};
+
 export type ProvisioningStep = {
   "ended_at"?: string | null;
   "evidence_ids": Array<string>;
@@ -183,6 +255,7 @@ export type ProvisioningStep = {
 };
 
 export type PublicLimits = {
+  "default_identifiers_visible": boolean;
   "job_ttl_seconds": number;
   "max_active_jobs": number;
   "max_archive_files": number;
@@ -208,11 +281,16 @@ export type Session = {
 
 export type Summary = {
   "confidence": string;
+  "coverage_warning"?: string | null;
   "current_status": string;
   "evidence_completeness": string;
+  "finding_counts": FindingCounts;
   "first_blocking_step"?: string | null;
+  "health_checks": Array<HealthCheck>;
   "kpis": Kpis;
   "latest_session_id"?: string | null;
+  "overall_status": string;
+  "primary_diagnosis"?: null | PrimaryDiagnosis;
   "recommended_actions": Array<string>;
   "rule_pack": string;
   "verdict": string;
@@ -227,9 +305,11 @@ export type TimelineEvent = {
   "evidence_id": string;
   "id": string;
   "message": string;
+  "occurrence_count": number;
   "provider"?: string | null;
   "sequence": number;
   "severity": string;
+  "temporal_scope": string;
   "timestamp_original"?: string | null;
   "timestamp_utc"?: string | null;
   "utc_offset_minutes"?: number | null;
@@ -251,16 +331,21 @@ export type TimelineQuery = {
   "severity"?: Array<string> | null;
   "since"?: string | null;
   "source"?: Array<string> | null;
+  "temporal_scope"?: Array<string> | null;
 };
 
-export type ApiSchemaName = "Application" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery";
+export type ApiSchemaName = "Application" | "ApplicationPage" | "ApplicationQuery" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "EntityPage" | "EntityQuery" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "FindingCounts" | "FindingPage" | "FindingQuery" | "HealthCheck" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "PrimaryDiagnosis" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery";
 export const apiSchemaNames = [
   "Application",
+  "ApplicationPage",
+  "ApplicationQuery",
   "Artifact",
   "ArtifactRequest",
   "BuildInfo",
   "ComparisonSummary",
   "CoverageRecord",
+  "EntityPage",
+  "EntityQuery",
   "ErrorBody",
   "EspResource",
   "EvidenceLink",
@@ -269,6 +354,10 @@ export const apiSchemaNames = [
   "ExportFormat",
   "ExportRequest",
   "Finding",
+  "FindingCounts",
+  "FindingPage",
+  "FindingQuery",
+  "HealthCheck",
   "HealthResponse",
   "JobPhase",
   "JobView",
@@ -276,6 +365,7 @@ export const apiSchemaNames = [
   "ManagedEntity",
   "ParseWarning",
   "PreviewResponse",
+  "PrimaryDiagnosis",
   "ProvisioningStep",
   "PublicLimits",
   "Session",

@@ -43,11 +43,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut event = tx.prepare_cached(
             "INSERT INTO events(id,artifact_id,timestamp_utc,provider,component,severity,message,current) VALUES (?1,'scale-artifact',?2,'ScaleProvider','ScaleComponent','info',?3,1)",
         )?;
-        let mut fts = tx.prepare_cached(
-            "INSERT INTO events_fts(rowid,event_id,message,provider,component) VALUES (?1,?2,?3,'ScaleProvider','ScaleComponent')",
-        )?;
         for index in 0..events {
-            let sequence = (index + 1) as i64;
+            let sequence = index + 1;
             let id = format!("scale-{sequence:07}");
             let timestamp = format!(
                 "2026-08-11T{:02}:{:02}:{:02}Z",
@@ -61,10 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "benchmark timeline event"
             };
             event.execute(params![id, timestamp, message])?;
-            fts.execute(params![sequence, id, message])?;
         }
     }
     tx.commit()?;
+    db::finalize_event_index(&conn)?;
     let insertion = insert_started.elapsed();
 
     let cursor_row = 500_000;
@@ -128,6 +125,7 @@ fn query(cursor: usize, search: Option<String>) -> TimelineQuery {
         component: None,
         session_id: None,
         since: None,
+        temporal_scope: None,
     }
 }
 

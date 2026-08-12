@@ -1746,6 +1746,7 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
+ "encoding_rs",
  "evtx",
  "futures-util",
  "http",

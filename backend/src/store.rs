@@ -53,6 +53,10 @@ struct ProgressState {
     phase: JobPhase,
     percent: u8,
     stage: String,
+    processed_artifacts: Option<u64>,
+    total_artifacts: Option<u64>,
+    unique_events: Option<u64>,
+    duplicate_events: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +64,10 @@ struct ProgressFile {
     phase: String,
     percent: u8,
     stage: String,
+    processed_artifacts: Option<u64>,
+    total_artifacts: Option<u64>,
+    unique_events: Option<u64>,
+    duplicate_events: Option<u64>,
 }
 
 impl AppState {
@@ -123,6 +131,10 @@ impl AppState {
                 phase: JobPhase::Uploading,
                 percent: 0,
                 stage: "Receiving upload".into(),
+                processed_artifacts: None,
+                total_artifacts: None,
+                unique_events: None,
+                duplicate_events: None,
             }),
             cancel: Mutex::new(CancellationToken::new()),
         });
@@ -399,6 +411,10 @@ impl Job {
             created_at: created.to_rfc3339(),
             expires_at: expires.to_rfc3339(),
             can_reanalyze: self.dir.join("upload.bin").is_file(),
+            processed_artifacts: status.processed_artifacts,
+            total_artifacts: status.total_artifacts,
+            unique_events: status.unique_events,
+            duplicate_events: status.duplicate_events,
         }
     }
 
@@ -417,12 +433,15 @@ impl Job {
             "ready" => JobPhase::Ready,
             _ => return,
         };
-        self.set_status(
+        *self.status.write().await = ProgressState {
             phase,
-            progress.percent.min(100),
-            &sanitize_stage(&progress.stage),
-        )
-        .await;
+            percent: progress.percent.min(100),
+            stage: sanitize_stage(&progress.stage),
+            processed_artifacts: progress.processed_artifacts,
+            total_artifacts: progress.total_artifacts,
+            unique_events: progress.unique_events,
+            duplicate_events: progress.duplicate_events,
+        };
     }
 
     async fn set_status(&self, phase: JobPhase, percent: u8, stage: &str) {
@@ -430,6 +449,10 @@ impl Job {
             phase,
             percent,
             stage: sanitize_stage(stage),
+            processed_artifacts: None,
+            total_artifacts: None,
+            unique_events: None,
+            duplicate_events: None,
         };
     }
 }
@@ -457,6 +480,7 @@ fn sanitize_stage(value: &str) -> String {
     match value {
         "Validating archive"
         | "Parsing diagnostic sources"
+        | "Building search index"
         | "Correlating evidence"
         | "Analysis ready" => value.to_owned(),
         _ => "Processing transient analysis".into(),

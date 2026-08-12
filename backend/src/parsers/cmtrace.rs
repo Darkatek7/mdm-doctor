@@ -1,8 +1,4 @@
-use std::{
-    fs::File,
-    io::{BufRead, BufReader},
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use regex::Regex;
@@ -10,7 +6,7 @@ use regex::Regex;
 use crate::{
     error::Result,
     ingest::ExtractedArtifact,
-    parsers::{EventInput, ParserContext},
+    parsers::{EventInput, ParserContext, text_reader::DecodedLines},
 };
 
 struct Pending {
@@ -34,31 +30,23 @@ pub fn parse(ctx: &mut ParserContext<'_>, artifact: &ExtractedArtifact) -> Resul
         )?;
         return Ok("failed");
     }
-    let file = File::open(&artifact.object_path)?;
-    let mut reader = BufReader::with_capacity(128 * 1024, file);
-    let mut raw = Vec::new();
+    let mut reader = DecodedLines::open(&artifact.object_path)?;
     let mut line_number = 0_u64;
     let mut pending: Option<Pending> = None;
     let mut cmtrace_records = 0_u64;
+    let mut replacements = 0_usize;
 
-    loop {
-        raw.clear();
-        let count = reader.read_until(b'\n', &mut raw)?;
-        if count == 0 {
-            break;
-        }
+    while let Some(decoded) = reader.next_line()? {
         line_number += 1;
-        if raw.len() > 1_048_576 {
+        replacements += decoded.replacements;
+        if decoded.truncated {
             ctx.warn(
                 Some(&artifact.id),
                 "text.line_too_long",
                 "A text record exceeded the one-megabyte line limit.",
             )?;
-            raw.truncate(1_048_576);
         }
-        let line = String::from_utf8_lossy(&raw)
-            .trim_end_matches(['\r', '\n'])
-            .to_owned();
+        let line = decoded.text;
         if let Some(record) = parse_line(&line, line_number) {
             if let Some(previous) = pending.take() {
                 emit(ctx, artifact, previous)?;
@@ -76,6 +64,13 @@ pub fn parse(ctx: &mut ParserContext<'_>, artifact: &ExtractedArtifact) -> Resul
     }
     if let Some(previous) = pending {
         emit(ctx, artifact, previous)?;
+    }
+    if replacements > 0 {
+        ctx.warn(
+            Some(&artifact.id),
+            "text.decode_replacement",
+            "Invalid text byte sequences were replaced while preserving valid CMTrace records.",
+        )?;
     }
     if cmtrace_records == 0 {
         super::structured::parse_text(ctx, artifact)?;
@@ -221,12 +216,17 @@ mod tests {
             object_path: path,
             normalized_path: "plain.log".into(),
             detected_type: "cmtrace-or-text".into(),
+            duplicate_of: None,
         };
         let mut ctx = ParserContext {
             conn: &conn,
             max_events: 100,
             emitted: 0,
             warnings: 0,
+            attempted: 0,
+            duplicate_events: 0,
+            seen: Default::default(),
+            duplicate_counts: Default::default(),
         };
         parse(&mut ctx, &artifact).unwrap();
         assert_eq!(ctx.emitted, 1);

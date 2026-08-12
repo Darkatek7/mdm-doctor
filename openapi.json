@@ -96,12 +96,32 @@
         }
       }
     },
+    "/api/v1/job/query/findings": {
+      "post": {
+        "summary": "Body-based filtered findings query",
+        "responses": {
+          "200": {
+            "description": "Finding page"
+          }
+        }
+      }
+    },
     "/api/v1/job/applications": {
       "get": {
         "summary": "Applications",
         "responses": {
           "200": {
             "description": "Applications"
+          }
+        }
+      }
+    },
+    "/api/v1/job/query/applications": {
+      "post": {
+        "summary": "Body-based filtered applications query",
+        "responses": {
+          "200": {
+            "description": "Application page"
           }
         }
       }
@@ -122,6 +142,16 @@
         "responses": {
           "200": {
             "description": "Entities"
+          }
+        }
+      }
+    },
+    "/api/v1/job/query/entities": {
+      "post": {
+        "summary": "Body-based filtered managed-entity query",
+        "responses": {
+          "200": {
+            "description": "Entity page"
           }
         }
       }
@@ -341,6 +371,69 @@
           }
         }
       },
+      "ApplicationPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Application"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ApplicationQuery": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "search": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Artifact": {
         "type": "object",
         "required": [
@@ -531,6 +624,78 @@
           },
           "state": {
             "type": "string"
+          }
+        }
+      },
+      "EntityPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedEntity"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "EntityQuery": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "entity_type": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "search": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -743,6 +908,8 @@
           "severity",
           "confidence",
           "current",
+          "temporal_scope",
+          "occurrence_count",
           "esp_tracked",
           "title",
           "explanation",
@@ -777,6 +944,17 @@
           "id": {
             "type": "string"
           },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "recommendation": {
             "type": "string"
           },
@@ -789,7 +967,148 @@
           "severity": {
             "type": "string"
           },
+          "temporal_scope": {
+            "type": "string"
+          },
           "title": {
+            "type": "string"
+          }
+        }
+      },
+      "FindingCounts": {
+        "type": "object",
+        "required": [
+          "current",
+          "historical",
+          "unknown"
+        ],
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "historical": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unknown": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "FindingPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "FindingQuery": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "search": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "temporal_scope": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "HealthCheck": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "state",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
             "type": "string"
           }
         }
@@ -835,11 +1154,27 @@
           "created_at": {
             "type": "string"
           },
+          "duplicate_events": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "expires_at": {
             "type": "string"
           },
           "phase": {
             "$ref": "#/components/schemas/JobPhase"
+          },
+          "processed_artifacts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "progress_percent": {
             "type": "integer",
@@ -848,6 +1183,22 @@
           },
           "stage": {
             "type": "string"
+          },
+          "total_artifacts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "unique_events": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -971,6 +1322,41 @@
           }
         }
       },
+      "PrimaryDiagnosis": {
+        "type": "object",
+        "required": [
+          "title",
+          "severity",
+          "confidence",
+          "recommendation",
+          "evidence_count"
+        ],
+        "properties": {
+          "affected_entity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "evidence_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "ProvisioningStep": {
         "type": "object",
         "required": [
@@ -1032,9 +1418,13 @@
           "max_job_ttl_seconds",
           "max_active_jobs",
           "timeline_page_size",
-          "timeline_page_max"
+          "timeline_page_max",
+          "default_identifiers_visible"
         ],
         "properties": {
+          "default_identifiers_visible": {
+            "type": "boolean"
+          },
           "job_ttl_seconds": {
             "type": "integer",
             "format": "int64",
@@ -1138,11 +1528,20 @@
           "evidence_completeness",
           "recommended_actions",
           "kpis",
-          "rule_pack"
+          "rule_pack",
+          "overall_status",
+          "health_checks",
+          "finding_counts"
         ],
         "properties": {
           "confidence": {
             "type": "string"
+          },
+          "coverage_warning": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "current_status": {
             "type": "string"
@@ -1150,11 +1549,20 @@
           "evidence_completeness": {
             "type": "string"
           },
+          "finding_counts": {
+            "$ref": "#/components/schemas/FindingCounts"
+          },
           "first_blocking_step": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "health_checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthCheck"
+            }
           },
           "kpis": {
             "$ref": "#/components/schemas/Kpis"
@@ -1163,6 +1571,19 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "overall_status": {
+            "type": "string"
+          },
+          "primary_diagnosis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PrimaryDiagnosis"
+              }
             ]
           },
           "recommended_actions": {
@@ -1187,6 +1608,8 @@
           "severity",
           "message",
           "current",
+          "temporal_scope",
+          "occurrence_count",
           "evidence_id"
         ],
         "properties": {
@@ -1226,6 +1649,11 @@
           "message": {
             "type": "string"
           },
+          "occurrence_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "provider": {
             "type": [
               "string",
@@ -1238,6 +1666,9 @@
             "minimum": 0
           },
           "severity": {
+            "type": "string"
+          },
+          "temporal_scope": {
             "type": "string"
           },
           "timestamp_original": {
@@ -1353,6 +1784,15 @@
             ]
           },
           "source": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "temporal_scope": {
             "type": [
               "array",
               "null"

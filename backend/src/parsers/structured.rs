@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufReader, Read},
 };
 
 use quick_xml::{Reader, events::Event};
@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::{
     error::Result,
     ingest::ExtractedArtifact,
-    parsers::{EventInput, ParserContext},
+    parsers::{EventInput, ParserContext, text_reader::DecodedLines},
 };
 
 const STRUCTURED_LIMIT: u64 = 64 * 1024 * 1024;
@@ -19,10 +19,24 @@ pub fn parse_registry(
     ctx: &mut ParserContext<'_>,
     artifact: &ExtractedArtifact,
 ) -> Result<&'static str> {
-    let file = File::open(&artifact.object_path)?;
+    let mut lines = DecodedLines::open(&artifact.object_path)?;
     let mut section = String::new();
-    for (index, line) in BufReader::new(file).lines().take(500_000).enumerate() {
-        let line = line?;
+    let mut index = 0_usize;
+    let mut replacements = 0_usize;
+    while index < 500_000 {
+        let Some(decoded) = lines.next_line()? else {
+            break;
+        };
+        index += 1;
+        replacements += decoded.replacements;
+        if decoded.truncated {
+            ctx.warn(
+                Some(&artifact.id),
+                "text.line_too_long",
+                "A registry record exceeded the one-megabyte line limit and was truncated safely.",
+            )?;
+        }
+        let line = decoded.text;
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             section = trimmed.to_owned();
@@ -33,7 +47,7 @@ pub fn parse_registry(
         }
         let context = format!("{} {}", section, trimmed);
         if relevant(&context) {
-            let span = format!("line:{}", index + 1);
+            let span = format!("line:{index}");
             ctx.emit(EventInput {
                 artifact_id: &artifact.id,
                 timestamp_utc: None,
@@ -51,6 +65,7 @@ pub fn parse_registry(
             })?;
         }
     }
+    warn_decoding(ctx, artifact, replacements)?;
     Ok("parsed")
 }
 
@@ -241,14 +256,28 @@ pub fn parse_text(
     ctx: &mut ParserContext<'_>,
     artifact: &ExtractedArtifact,
 ) -> Result<&'static str> {
-    let file = File::open(&artifact.object_path)?;
-    for (index, line) in BufReader::new(file).lines().take(500_000).enumerate() {
-        let line = line?;
+    let mut lines = DecodedLines::open(&artifact.object_path)?;
+    let mut index = 0_usize;
+    let mut replacements = 0_usize;
+    while index < 500_000 {
+        let Some(decoded) = lines.next_line()? else {
+            break;
+        };
+        index += 1;
+        replacements += decoded.replacements;
+        if decoded.truncated {
+            ctx.warn(
+                Some(&artifact.id),
+                "text.line_too_long",
+                "A text record exceeded the one-megabyte line limit and was truncated safely.",
+            )?;
+        }
+        let line = decoded.text;
         if line.trim().is_empty() || !relevant(&line) {
             continue;
         }
         let message = truncate(&line, 8192);
-        let span = format!("line:{}", index + 1);
+        let span = format!("line:{index}");
         ctx.emit(EventInput {
             artifact_id: &artifact.id,
             timestamp_utc: None,
@@ -265,7 +294,19 @@ pub fn parse_text(
             source_span: Some(&span),
         })?;
     }
+    warn_decoding(ctx, artifact, replacements)?;
     Ok("parsed")
+}
+
+fn warn_decoding(
+    ctx: &mut ParserContext<'_>,
+    artifact: &ExtractedArtifact,
+    replacements: usize,
+) -> Result<()> {
+    if replacements > 0 {
+        ctx.warn(Some(&artifact.id), "text.decode_replacement", "Invalid text byte sequences were replaced while preserving the remainder of the artifact.")?;
+    }
+    Ok(())
 }
 
 fn read_bounded(path: &std::path::Path) -> Result<Vec<u8>> {
