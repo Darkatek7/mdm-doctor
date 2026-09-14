@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::Config,
-    error::{AppError, Result},
+    error::{AppError, Result, SanitizedFailure, WORKER_FAILURE_FILE},
     models::{JobPhase, JobView},
 };
 
@@ -57,6 +57,8 @@ struct ProgressState {
     total_artifacts: Option<u64>,
     unique_events: Option<u64>,
     duplicate_events: Option<u64>,
+    error_code: Option<String>,
+    error_message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +137,8 @@ impl AppState {
                 total_artifacts: None,
                 unique_events: None,
                 duplicate_events: None,
+                error_code: None,
+                error_message: None,
             }),
             cancel: Mutex::new(CancellationToken::new()),
         });
@@ -193,14 +197,13 @@ impl AppState {
                     job.set_status(JobPhase::Ready, 100, "Analysis ready").await;
                     job.touch();
                 }
-                _ => {
+                Ok(()) => {
                     purge_dir(&job.dir).await;
-                    job.set_status(
-                        JobPhase::Failed,
-                        100,
-                        "Analysis failed safely; transient data was removed",
-                    )
-                    .await;
+                    job.set_failure(&AppError::Internal).await;
+                }
+                Err(error) => {
+                    purge_dir(&job.dir).await;
+                    job.set_failure(&error).await;
                 }
             }
         });
@@ -283,7 +286,15 @@ impl AppState {
         tokio::pin!(timeout);
         tokio::select! {
             status = child.wait() => {
-                if status?.success() { Ok(()) } else { Err(AppError::Internal) }
+                if status?.success() {
+                    Ok(())
+                } else {
+                    let failure = tokio::fs::read(job.dir.join(WORKER_FAILURE_FILE))
+                        .await
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<SanitizedFailure>(&bytes).ok());
+                    failure.map_or(Err(AppError::Internal), |failure| Err(AppError::WorkerFailure(failure)))
+                }
             }
             _ = token.cancelled() => {
                 let _ = child.kill().await;
@@ -415,6 +426,8 @@ impl Job {
             total_artifacts: status.total_artifacts,
             unique_events: status.unique_events,
             duplicate_events: status.duplicate_events,
+            error_code: status.error_code,
+            error_message: status.error_message,
         }
     }
 
@@ -441,6 +454,8 @@ impl Job {
             total_artifacts: progress.total_artifacts,
             unique_events: progress.unique_events,
             duplicate_events: progress.duplicate_events,
+            error_code: None,
+            error_message: None,
         };
     }
 
@@ -453,6 +468,22 @@ impl Job {
             total_artifacts: None,
             unique_events: None,
             duplicate_events: None,
+            error_code: None,
+            error_message: None,
+        };
+    }
+
+    async fn set_failure(&self, error: &AppError) {
+        *self.status.write().await = ProgressState {
+            phase: JobPhase::Failed,
+            percent: 100,
+            stage: "Import failed".into(),
+            processed_artifacts: None,
+            total_artifacts: None,
+            unique_events: None,
+            duplicate_events: None,
+            error_code: Some(error.code().to_owned()),
+            error_message: Some(error.message().to_owned()),
         };
     }
 }
@@ -511,17 +542,17 @@ fn package_folder(config: &Config, source: &Path, destination: &Path) -> Result<
             continue;
         }
         if !metadata.is_file() || entry.file_type().is_symlink() {
-            return Err(AppError::UnsafeArchive);
+            return Err(AppError::unsafe_archive("archive file count exceeded"));
         }
         count += 1;
         total = total
             .checked_add(metadata.len())
-            .ok_or(AppError::UnsafeArchive)?;
+            .ok_or_else(|| AppError::unsafe_archive("total expansion limit exceeded"))?;
         if count > config.max_archive_files
             || metadata.len() > config.max_file_bytes
             || total > config.max_expanded_bytes
         {
-            return Err(AppError::UnsafeArchive);
+            return Err(AppError::unsafe_archive("total expansion limit exceeded"));
         }
         let relative = entry
             .path()

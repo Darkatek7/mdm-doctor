@@ -19,6 +19,7 @@ use crate::{
 };
 
 const BUFFER_SIZE: usize = 128 * 1024;
+const MAX_SPARSE_EVTX_RATIO_EXCEPTION_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ExtractedArtifact {
@@ -157,15 +158,18 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
             archive_len,
             ctx.config.max_compression_ratio,
         );
+        let sparse_evtx_exception = ratio_exceeded
+            && normalized.to_ascii_lowercase().ends_with(".evtx")
+            && entry.size() <= MAX_SPARSE_EVTX_RATIO_EXCEPTION_BYTES;
         if ratio_exceeded && normalized.to_ascii_lowercase().ends_with(".etl") {
             quarantined.insert(index);
-        } else if ratio_exceeded {
+        } else if ratio_exceeded && !sparse_evtx_exception {
             return Err(AppError::unsafe_archive("entry expansion ratio exceeded"));
         }
         validate_declared_size(
             ctx,
             entry.size(),
-            if ratio_exceeded {
+            if ratio_exceeded && (sparse_evtx_exception || quarantined.contains(&index)) {
                 entry.size().max(1)
             } else {
                 entry.compressed_size()
@@ -406,7 +410,9 @@ fn validate_declared_size(
     if size > ctx.config.max_file_bytes {
         return Err(AppError::unsafe_archive("expanded file limit exceeded"));
     }
-    *total = total.checked_add(size).ok_or(AppError::UnsafeArchive)?;
+    *total = total
+        .checked_add(size)
+        .ok_or_else(|| AppError::unsafe_archive("total expansion limit exceeded"))?;
     if ctx.expanded_bytes.saturating_add(*total) > ctx.config.max_expanded_bytes {
         return Err(AppError::unsafe_archive("total expansion limit exceeded"));
     }
@@ -450,7 +456,7 @@ fn write_member<R: Read>(
         }
         size = size
             .checked_add(count as u64)
-            .ok_or(AppError::UnsafeArchive)?;
+            .ok_or_else(|| AppError::unsafe_archive("actual expansion limit exceeded"))?;
         if size > ctx.config.max_file_bytes
             || ctx.expanded_bytes.saturating_add(size) > ctx.config.max_expanded_bytes
         {
@@ -720,7 +726,7 @@ mod tests {
             archive_with(&archive, &members, &[]);
             assert!(matches!(
                 ingest(&archive, &Config::default()),
-                Err(AppError::UnsafeArchive)
+                Err(AppError::UnsafeArchive(_))
             ));
             assert!(
                 !temp
@@ -740,7 +746,7 @@ mod tests {
         archive_with(&traversal, &[("../escape.log", b"x")], &[]);
         assert!(matches!(
             ingest(&traversal, &Config::default()),
-            Err(AppError::UnsafeArchive)
+            Err(AppError::UnsafeArchive(_))
         ));
 
         let size_root = tempfile::tempdir().unwrap();
@@ -752,7 +758,7 @@ mod tests {
         };
         assert!(matches!(
             ingest(&oversized, &config),
-            Err(AppError::UnsafeArchive)
+            Err(AppError::UnsafeArchive(_))
         ));
 
         let malformed_root = tempfile::tempdir().unwrap();
@@ -763,7 +769,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             ingest(&malformed, &Config::default()),
-            Err(AppError::UnsafeArchive)
+            Err(AppError::UnsafeArchive(_))
         ));
     }
 
@@ -796,7 +802,44 @@ mod tests {
         archive_with(&rejected, &[("compressible.log", payload.as_slice())], &[]);
         assert!(matches!(
             ingest(&rejected, &Config::default()),
-            Err(AppError::UnsafeArchive)
+            Err(AppError::UnsafeArchive(_))
+        ));
+    }
+
+    #[test]
+    fn small_sparse_evtx_is_accepted_without_weakening_other_ratio_checks() {
+        let mut sparse_evtx = vec![0_u8; 69_632];
+        sparse_evtx[..8].copy_from_slice(b"ElfFile\0");
+        let mut filler = vec![0_u8; 128 * 1024];
+        OsRng.fill_bytes(&mut filler);
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("upload.bin");
+        archive_with(
+            &archive,
+            &[
+                ("sparse.evtx", sparse_evtx.as_slice()),
+                ("bounded.bin", filler.as_slice()),
+            ],
+            &[],
+        );
+        let report = ingest(&archive, &Config::default()).unwrap();
+        assert!(
+            report
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.detected_type == "evtx")
+        );
+
+        let rejected_root = tempfile::tempdir().unwrap();
+        let rejected = rejected_root.path().join("upload.bin");
+        archive_with(
+            &rejected,
+            &[("compressible.log", sparse_evtx.as_slice())],
+            &[],
+        );
+        assert!(matches!(
+            ingest(&rejected, &Config::default()),
+            Err(AppError::UnsafeArchive(_))
         ));
     }
 }

@@ -224,6 +224,8 @@ export type JobView = {
   "can_reanalyze": boolean;
   "created_at": string;
   "duplicate_events"?: number | null;
+  "error_code"?: string | null;
+  "error_message"?: string | null;
   "expires_at": string;
   "phase": JobPhase;
   "processed_artifacts"?: number | null;

@@ -1307,6 +1307,18 @@
             "format": "int64",
             "minimum": 0
           },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "type": "string"
           },

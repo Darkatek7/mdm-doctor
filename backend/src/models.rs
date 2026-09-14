@@ -34,6 +34,8 @@ pub struct JobView {
     pub total_artifacts: Option<u64>,
     pub unique_events: Option<u64>,
     pub duplicate_events: Option<u64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

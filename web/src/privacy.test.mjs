@@ -29,6 +29,13 @@ describe("browser privacy contract", () => {
     assert.match(source, /Date\.parse\(slot\.job\.created_at\)/);
   });
 
+  it("shows sanitized worker failures instead of a generic progress message", () => {
+    const source = readFileSync(new URL("App.tsx", import.meta.url), "utf8");
+    assert.match(source, /slot\.job\.error_message/);
+    assert.match(source, /Error code: \{slot\.job\.error_code\}/);
+    assert.match(source, /failed\?"Import failed"/);
+  });
+
   it("loads the configured identifier default without browser persistence", () => {
     const source = readFileSync(new URL("App.tsx", import.meta.url), "utf8");
     assert.match(source, /default_identifiers_visible\?"original":"redacted"/);

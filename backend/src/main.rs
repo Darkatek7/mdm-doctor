@@ -52,7 +52,12 @@ async fn main() {
     }) {
         Command::Serve { import_folder } => serve(import_folder).await,
         Command::Worker { job_dir } => {
-            Config::from_env().and_then(|config| analysis::run_worker(&config, &job_dir))
+            let result =
+                Config::from_env().and_then(|config| analysis::run_worker(&config, &job_dir));
+            if let Err(error) = &result {
+                persist_worker_failure(&job_dir, error);
+            }
+            result
         }
         Command::Healthcheck => healthcheck(),
         Command::Openapi { output } => {
@@ -75,6 +80,17 @@ async fn main() {
             eprintln!("MDM Doctor stopped after a sanitized fatal error.");
         }
         std::process::exit(1);
+    }
+}
+
+fn persist_worker_failure(job_dir: &std::path::Path, error: &mdm_doctor::error::AppError) {
+    let temporary = job_dir.join("failure.partial");
+    let destination = job_dir.join(mdm_doctor::error::WORKER_FAILURE_FILE);
+    let Ok(bytes) = serde_json::to_vec(&error.sanitized_failure()) else {
+        return;
+    };
+    if std::fs::write(&temporary, bytes).is_ok() {
+        let _ = std::fs::rename(temporary, destination);
     }
 }
 
