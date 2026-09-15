@@ -1,5 +1,4 @@
 name: mdm-doctor
-
 services:
   mdm-doctor:
     build:
@@ -9,7 +8,7 @@ services:
     restart: unless-stopped
     init: true
     read_only: true
-    user: "10001:10001"
+    user: 10001:10001
     cap_drop:
       - ALL
     security_opt:
@@ -52,9 +51,14 @@ services:
       DEFAULT_IDENTIFIERS_VISIBLE: ${DEFAULT_IDENTIFIERS_VISIBLE:-true}
       RUST_BACKTRACE: "0"
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080"
+      # LAN clients (10.0.0.0/24) need a routable host bind; keep 127.0.0.1 here
+      # and override BIND_ADDRESS in the gitignored .env on the deployment host.
+      - ${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080
     healthcheck:
-      test: ["CMD", "/usr/local/bin/mdm-doctor", "healthcheck"]
+      test:
+        - CMD
+        - /usr/local/bin/mdm-doctor
+        - healthcheck
       interval: 10s
       timeout: 3s
       retries: 6
@@ -62,8 +66,11 @@ services:
     networks:
       - mdm-doctor-internal
     logging:
-      driver: none
-
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 networks:
-  mdm-doctor-internal:
-    internal: true
+  # Not `internal:` — Docker drops published ports on internal networks,
+  # so LAN access (see .env BIND_ADDRESS) requires egress-capable routing.
+  mdm-doctor-internal: {}
