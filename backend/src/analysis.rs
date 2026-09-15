@@ -294,6 +294,8 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
     static EXIT: OnceLock<Regex> = OnceLock::new();
     static NAME: OnceLock<Regex> = OnceLock::new();
     static APP_ID: OnceLock<Regex> = OnceLock::new();
+    static SCRIPT: OnceLock<Regex> = OnceLock::new();
+    static NAME_PAIR: OnceLock<Regex> = OnceLock::new();
     let guid = GUID.get_or_init(|| {
         Regex::new(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
             .expect("static regex")
@@ -304,6 +306,13 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
     });
     let name = NAME.get_or_init(|| Regex::new(r#"(?i)[\"']?(?:app(?:lication)?(?:\s+display)?\s*name|displayname|productname)[\"']?\s*[:=]\s*[\"']?([^\"'\r\n,;}\]]{2,160})"#).expect("static regex"));
     let app_id = APP_ID.get_or_init(|| Regex::new(r#"(?i)(?:app(?:lication)?(?:\s+policy)?(?:\s+with)?\s+id|applicationid|applicatonid|app_id)[\"']?\s*[:=]\s*[\"']?([0-9a-f]{8}-[0-9a-f-]{27,36})"#).expect("static regex"));
+    let script = SCRIPT.get_or_init(|| Regex::new(r"(?i)(?:detectionscripts|remediationscripts|installscripts|content)\\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})").expect("static regex"));
+    let name_pair = NAME_PAIR.get_or_init(|| {
+        Regex::new(
+            r"(?i)\bid\s*=\s*([0-9a-f]{8}-[0-9a-f-]{27,31})\s*,\s*name\s*=\s*([^)\r\n]{2,160})",
+        )
+        .expect("static regex")
+    });
     #[derive(Clone)]
     struct Row {
         event_id: String,
@@ -340,6 +349,7 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
         state: String,
         latest_sequence: u64,
         app_type: String,
+        guid_key: Option<String>,
     }
     let explicit_name = |message: &str| -> Option<String> {
         let raw = name
@@ -368,6 +378,18 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
             explicit_name(&row.message),
         ) {
             name_by_key.entry(key).or_insert(display);
+        }
+        // "[Win32App] Content cache miss for app (id = <guid>, name = <app>)".
+        for (key, display) in name_pair
+            .captures_iter(&row.message)
+            .filter_map(|captures| Some((captures.get(1)?.as_str(), captures.get(2)?.as_str())))
+        {
+            let display = display.trim().trim_matches(['"', '\'']);
+            if display.len() >= 2 {
+                name_by_key
+                    .entry(key.to_ascii_lowercase())
+                    .or_insert_with(|| display.to_owned());
+            }
         }
     }
     let mut apps = std::collections::BTreeMap::<String, AppBuild>::new();
@@ -405,6 +427,14 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
                 .into_iter()
                 .map(|(key, _)| key),
         );
+        // AgentExecutor runs app scripts as ...\DetectionScripts\<app-id>_N.ps1;
+        // the path GUID is the policy Id, so exit lines join to the named app.
+        keys.extend(
+            script
+                .captures_iter(&row.message)
+                .filter_map(|captures| captures.get(1))
+                .map(|value| value.as_str().to_ascii_lowercase()),
+        );
         let display = explicit_name(&row.message);
         if keys.is_empty() {
             if let Some(display) = &display {
@@ -422,6 +452,9 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
             let app_id = stable_id("app", &key);
             last_app.insert(row.artifact_id.clone(), key.clone());
             let item = apps.entry(app_id.clone()).or_default();
+            if item.guid_key.is_none() && key.len() == 36 && guid.is_match(&key) {
+                item.guid_key = Some(key.clone());
+            }
             item.name = item
                 .name
                 .take()
@@ -480,7 +513,12 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
         } else {
             item.state
         };
-        let display_name = item.name.unwrap_or_else(|| "Unknown application".into());
+        // Apps identified only by their policy GUID (Win32 content that was
+        // already cached never logs a display name) stay distinguishable.
+        let display_name = item.name.unwrap_or_else(|| match &item.guid_key {
+            Some(key) => format!("Unknown application ({}…)", &key[..8]),
+            None => "Unknown application".into(),
+        });
         let evidence = item.evidence.into_iter().collect::<Vec<_>>();
         db::insert_application(
             conn,
@@ -1735,6 +1773,75 @@ mod tests {
             .query_row("SELECT state FROM applications", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "observed");
+    }
+
+    #[test]
+    fn script_path_guids_attribute_results_to_named_apps() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        for (key, message) in [
+            (
+                "policy",
+                r#"Get policies = [{"Id":"11111111-2222-3333-4444-555555555555","Name":"Google Drive 129.0.1","Intent":4}]"#,
+            ),
+            (
+                "detect",
+                r#"C:\Program Files (x86)\Microsoft Intune Management Extension\Content\DetectionScripts\11111111-2222-3333-4444-555555555555_1.ps1"#,
+            ),
+            ("exit", "Powershell exit code is 5"),
+            (
+                "other-detect",
+                r#"[Win32App] Detection script file C:\Program Files (x86)\Microsoft Intune Management Extension\Content\DetectionScripts\99999999-2222-3333-4444-555555555555_1.ps1 is saved."#,
+            ),
+            ("other-exit", "Powershell exit code is 0"),
+        ] {
+            event(
+                &conn,
+                key,
+                Some("2026-09-14T09:00:00+00:00"),
+                Some("IntuneManagementExtension"),
+                None,
+                Some("machine"),
+                message,
+            );
+        }
+        correlate(&conn).unwrap();
+
+        let (state, attempts): (String, i64) = conn
+            .query_row(
+                "SELECT state,attempt_count FROM applications WHERE name='Google Drive 129.0.1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), attempts), ("failed", 1));
+        let exit: i64 = conn
+            .query_row(
+                "SELECT exit_code FROM execution_attempts LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exit, 5);
+        let unnamed: String = conn
+            .query_row(
+                "SELECT name FROM applications WHERE name LIKE 'Unknown application (%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unnamed, "Unknown application (99999999…)");
+        let anonymous: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM applications WHERE name='Unknown application'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(anonymous, 0);
     }
 
     #[test]

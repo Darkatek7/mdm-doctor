@@ -1161,7 +1161,7 @@ pub fn summary(conn: &Connection) -> Result<Summary> {
     let mut user_impact: Vec<UserImpact> = Vec::new();
     let mut app_stmt =
         conn.prepare(
-            "SELECT id,name,esp_tracked FROM applications WHERE state='failed' AND name<>'Unknown application' LIMIT 5",
+            "SELECT id,name,esp_tracked FROM applications WHERE state='failed' AND name NOT LIKE 'Unknown application%' LIMIT 5",
         )?;
     let failed_apps: Vec<(String, String, bool)> = app_stmt
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
