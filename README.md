@@ -12,7 +12,7 @@ steps — without accounts, telemetry, or durable diagnostic storage.
 [![Container](https://github.com/Darkatek7/mdm-doctor/actions/workflows/publish-container.yml/badge.svg)](https://github.com/Darkatek7/mdm-doctor/actions/workflows/publish-container.yml)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/Darkatek7/mdm-doctor/pkgs/container/mdm-doctor)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Rule pack](https://img.shields.io/badge/rule%20pack-2026.08-08766a)](ARCHITECTURE.md)
+[![Rule pack](https://img.shields.io/badge/rule%20pack-2026.09-08766a)](ARCHITECTURE.md)
 
 [Quick start](#quick-start) · [Explore the UI](#explore-the-ui) ·
 [Security model](#security-model) · [Architecture](#architecture) ·

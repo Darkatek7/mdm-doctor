@@ -18,7 +18,7 @@ file size, file count, and nesting limits still apply.
 
 The worker creates a typed SQLite database in a staging filename, parses each
 supported artifact as a stream, correlates normalized evidence, runs rule pack
-`2026.08`, then atomically renames the completed database. SQLite uses bundled
+`2026.09`, then atomically renames the completed database. SQLite uses bundled
 FTS5 and memory-backed temporary storage. Unknown/unsupported sources become
 coverage records instead of silently disappearing.
 

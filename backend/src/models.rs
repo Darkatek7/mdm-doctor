@@ -70,6 +70,16 @@ pub struct Summary {
     pub health_checks: Vec<HealthCheck>,
     pub finding_counts: FindingCounts,
     pub coverage_warning: Option<String>,
+    pub user_impact: Vec<UserImpact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct UserImpact {
+    pub kind: String,
+    pub name: String,
+    pub detail: String,
+    pub severity: String,
+    pub last_seen_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

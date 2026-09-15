@@ -10,7 +10,7 @@ use crate::{
         CoverageRecord, EntityPage, EntityQuery, EntitySummary, EntityTypeCount, EspResource,
         EvidenceLink, ExecutionAttempt, Finding, FindingCounts, FindingPage, FindingQuery,
         HealthCheck, Kpis, ManagedEntity, ParseWarning, PrimaryDiagnosis, ProvisioningStep,
-        Session, Summary, TimelineEvent, TimelinePage, TimelineQuery,
+        Session, Summary, TimelineEvent, TimelinePage, TimelineQuery, UserImpact,
     },
 };
 
@@ -1158,6 +1158,79 @@ pub fn summary(conn: &Connection) -> Result<Summary> {
             "Core sources were parsed without a global safety-limit warning.".into()
         }),
     });
+    let mut user_impact: Vec<UserImpact> = Vec::new();
+    let mut app_stmt =
+        conn.prepare(
+            "SELECT id,name,esp_tracked FROM applications WHERE state='failed' AND name<>'Unknown application' LIMIT 5",
+        )?;
+    let failed_apps: Vec<(String, String, bool)> = app_stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, name, esp_tracked) in failed_apps {
+        let (exit_code, started_at): (Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT exit_code,started_at FROM execution_attempts WHERE application_id=?1 ORDER BY rowid DESC LIMIT 1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((None, None));
+        let mut detail = "Install failed".to_owned();
+        if let Some(code) = exit_code {
+            detail.push_str(&format!(" · exit {code}"));
+            if let Some((meaning, _)) = crate::analysis::exit_semantics(code) {
+                detail.push_str(&format!(" — {meaning}"));
+            }
+        }
+        user_impact.push(UserImpact {
+            kind: "application".into(),
+            name,
+            detail,
+            severity: if esp_tracked { "critical" } else { "high" }.into(),
+            last_seen_at: started_at,
+        });
+    }
+    let mut esp_stmt =
+        conn.prepare("SELECT DISTINCT substep FROM esp_resources WHERE blocking_proven=1 LIMIT 2")?;
+    let substeps: Vec<String> = esp_stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    user_impact.extend(substeps.into_iter().map(|substep| UserImpact {
+        kind: "esp".into(),
+        name: substep,
+        detail: "Proven blocking step during enrollment".into(),
+        severity: "critical".into(),
+        last_seen_at: None,
+    }));
+    user_impact.extend(
+        finding_rows
+            .iter()
+            .filter(|f| {
+                f.temporal_scope == "current"
+                    && (f.severity == "critical" || f.severity == "high")
+                    && !f.rule_id.starts_with("ime.app.")
+            })
+            .take(8usize.saturating_sub(user_impact.len()))
+            .map(|f| UserImpact {
+                kind: "finding".into(),
+                name: f.title.clone(),
+                detail: f.recommendation.clone(),
+                severity: f.severity.clone(),
+                last_seen_at: f.last_seen_at.clone(),
+            }),
+    );
+    let rank = |severity: &str| match severity {
+        "critical" => 0u8,
+        "high" => 1,
+        "medium" => 2,
+        _ => 3,
+    };
+    user_impact.sort_by(|a, b| {
+        rank(&a.severity)
+            .cmp(&rank(&b.severity))
+            .then_with(|| b.last_seen_at.cmp(&a.last_seen_at))
+    });
+    user_impact.truncate(8);
     Ok(Summary {
         verdict: top
             .map(|f| f.title.clone())
@@ -1200,6 +1273,7 @@ pub fn summary(conn: &Connection) -> Result<Summary> {
         health_checks,
         finding_counts,
         coverage_warning,
+        user_impact,
     })
 }
 
@@ -1578,5 +1652,55 @@ mod tests {
         assert_eq!(page.summary.total, 3);
         assert_eq!(page.summary.attempted, 2);
         assert_eq!(page.summary.failed, 1);
+    }
+
+    #[test]
+    fn user_impact_panel_keeps_only_attributable_failures() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open(&root.path().join("analysis.sqlite")).unwrap();
+        initialize(&conn).unwrap();
+        for (id, name) in [
+            ("app:anon", "Unknown application"),
+            ("app:real", "Winget App"),
+        ] {
+            insert_application(
+                &conn,
+                &Application {
+                    id: id.into(),
+                    name: name.into(),
+                    app_type: "Managed".into(),
+                    intent: None,
+                    install_context: None,
+                    state: "failed".into(),
+                    esp_tracked: false,
+                    attempt_count: 1,
+                    evidence_ids: Vec::new(),
+                },
+            )
+            .unwrap();
+            insert_attempt(
+                &conn,
+                &ExecutionAttempt {
+                    id: format!("attempt:{id}"),
+                    application_id: Some(id.into()),
+                    started_at: Some("2026-09-14T10:00:00+00:00".into()),
+                    ended_at: None,
+                    exit_code: Some(1603),
+                    detection_result: None,
+                    reboot_during_attempt: false,
+                    state: "failed".into(),
+                    evidence_ids: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
+        let names: Vec<String> = summary(&conn)
+            .unwrap()
+            .user_impact
+            .into_iter()
+            .filter(|i| i.kind == "application")
+            .map(|i| i.name)
+            .collect();
+        assert_eq!(names, vec!["Winget App".to_owned()]);
     }
 }

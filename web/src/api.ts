@@ -23,6 +23,7 @@ import type {
   Summary,
   TimelineEvent,
   TimelinePage,
+  UserImpact,
 } from "./generated-api";
 
 export type {
@@ -42,6 +43,7 @@ export type {
   Summary,
   TimelineEvent,
   TimelinePage,
+  UserImpact,
   EntityPage,
   EntitySummary,
 };

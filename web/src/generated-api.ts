@@ -323,6 +323,7 @@ export type Summary = {
   "primary_diagnosis"?: null | PrimaryDiagnosis;
   "recommended_actions": Array<string>;
   "rule_pack": string;
+  "user_impact": Array<UserImpact>;
   "verdict": string;
 };
 
@@ -364,7 +365,15 @@ export type TimelineQuery = {
   "temporal_scope"?: Array<string> | null;
 };
 
-export type ApiSchemaName = "Application" | "ApplicationPage" | "ApplicationQuery" | "ApplicationSummary" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "EntityPage" | "EntityQuery" | "EntitySummary" | "EntityTypeCount" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "FindingCounts" | "FindingPage" | "FindingQuery" | "HealthCheck" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "PrimaryDiagnosis" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery";
+export type UserImpact = {
+  "detail": string;
+  "kind": string;
+  "last_seen_at"?: string | null;
+  "name": string;
+  "severity": string;
+};
+
+export type ApiSchemaName = "Application" | "ApplicationPage" | "ApplicationQuery" | "ApplicationSummary" | "Artifact" | "ArtifactRequest" | "BuildInfo" | "ComparisonSummary" | "CoverageRecord" | "EntityPage" | "EntityQuery" | "EntitySummary" | "EntityTypeCount" | "ErrorBody" | "EspResource" | "EvidenceLink" | "EvidenceRequest" | "ExecutionAttempt" | "ExportFormat" | "ExportRequest" | "Finding" | "FindingCounts" | "FindingPage" | "FindingQuery" | "HealthCheck" | "HealthResponse" | "JobPhase" | "JobView" | "Kpis" | "ManagedEntity" | "ParseWarning" | "PreviewResponse" | "PrimaryDiagnosis" | "ProvisioningStep" | "PublicLimits" | "Session" | "Summary" | "TimelineEvent" | "TimelinePage" | "TimelineQuery" | "UserImpact";
 export const apiSchemaNames = [
   "Application",
   "ApplicationPage",
@@ -405,5 +414,6 @@ export const apiSchemaNames = [
   "Summary",
   "TimelineEvent",
   "TimelinePage",
-  "TimelineQuery"
+  "TimelineQuery",
+  "UserImpact"
 ] as const;

@@ -300,7 +300,7 @@ where
                     "parsed".into()
                 },
                 result_code: None,
-                parser: "mdm-doctor/2026.08".into(),
+                parser: "mdm-doctor/2026.09".into(),
                 artifact_count: count,
                 explanation: if state == "unsupported" {
                     "The source is present but no safe parser is enabled.".into()
@@ -345,7 +345,7 @@ fn add_expected_coverage(conn: &Connection) -> Result<()> {
     ] {
         let id = stable_id("coverage", source);
         conn.execute(
-            "INSERT OR IGNORE INTO coverage(id,source,classification,state,parser,artifact_count,explanation) VALUES (?1,?2,?3,'unavailable','mdm-doctor/2026.08',0,'The collection did not include a recognized source for this category.')",
+            "INSERT OR IGNORE INTO coverage(id,source,classification,state,parser,artifact_count,explanation) VALUES (?1,?2,?3,'unavailable','mdm-doctor/2026.09',0,'The collection did not include a recognized source for this category.')",
             rusqlite::params![id,source,classification],
         )?;
     }
