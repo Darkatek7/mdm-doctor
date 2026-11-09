@@ -28,4 +28,7 @@ services:
     networks:
       - mdm-doctor-internal
     logging:
-      driver: none
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"

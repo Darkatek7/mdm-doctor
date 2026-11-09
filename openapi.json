@@ -1307,6 +1307,18 @@
             "format": "int64",
             "minimum": 0
           },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "type": "string"
           },
@@ -1676,7 +1688,8 @@
           "rule_pack",
           "overall_status",
           "health_checks",
-          "finding_counts"
+          "finding_counts",
+          "user_impact"
         ],
         "properties": {
           "confidence": {
@@ -1739,6 +1752,12 @@
           },
           "rule_pack": {
             "type": "string"
+          },
+          "user_impact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserImpact"
+            }
           },
           "verdict": {
             "type": "string"
@@ -1945,6 +1964,35 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "UserImpact": {
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "detail",
+          "severity"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
           }
         }
       }

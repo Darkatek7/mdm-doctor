@@ -15,10 +15,8 @@ The allowlist includes permissive Apache, MIT, BSD, ISC, Unicode, Zlib,
 bzip2, and CC0 terms plus MPL-2.0 for file-level-copyleft HTML parser
 dependencies. No MPL-covered source is modified or copied into MDM Doctor.
 
-`RUSTSEC-2021-0153` is explicitly acknowledged because `evtx` transitively
-uses the unmaintained `encoding` crate. The advisory identifies maintenance
-status only, not a vulnerability, and provides no safe upgrade. All other
-RustSec advisories remain denied.
+No RustSec advisory is ignored; every RustSec advisory that matches a
+dependency fails CI.
 
 The application source is licensed under Apache-2.0. Direct runtime libraries
 used for parsing and serving include Axum (MIT), Tokio (MIT), `evtx` (MIT),

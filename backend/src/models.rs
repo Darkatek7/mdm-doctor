@@ -34,6 +34,8 @@ pub struct JobView {
     pub total_artifacts: Option<u64>,
     pub unique_events: Option<u64>,
     pub duplicate_events: Option<u64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -70,6 +72,16 @@ pub struct Summary {
     pub health_checks: Vec<HealthCheck>,
     pub finding_counts: FindingCounts,
     pub coverage_warning: Option<String>,
+    pub user_impact: Vec<UserImpact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct UserImpact {
+    pub kind: String,
+    pub name: String,
+    pub detail: String,
+    pub severity: String,
+    pub last_seen_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

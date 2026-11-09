@@ -11,4 +11,4 @@ pub mod redaction;
 pub mod store;
 
 pub const APP_NAME: &str = "MDM Doctor";
-pub const RULE_PACK_VERSION: &str = "2026.08";
+pub const RULE_PACK_VERSION: &str = "2026.09";

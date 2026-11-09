@@ -294,16 +294,25 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
     static EXIT: OnceLock<Regex> = OnceLock::new();
     static NAME: OnceLock<Regex> = OnceLock::new();
     static APP_ID: OnceLock<Regex> = OnceLock::new();
+    static SCRIPT: OnceLock<Regex> = OnceLock::new();
+    static NAME_PAIR: OnceLock<Regex> = OnceLock::new();
     let guid = GUID.get_or_init(|| {
         Regex::new(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
             .expect("static regex")
     });
     let exit = EXIT.get_or_init(|| {
-        Regex::new(r"(?i)(?:exit(?:ed)?(?:\s+with)?(?:\s+code)?|return\s+code)\D{0,12}(-?\d{1,10})")
+        Regex::new(r"(?i)\b(?:exit(?:ed)?(?:\s*with)?[\s_]*code|return(?:ed)?[\s_]*code)\b\D{0,6}?(-?\d{1,10})\b")
             .expect("static regex")
     });
     let name = NAME.get_or_init(|| Regex::new(r#"(?i)[\"']?(?:app(?:lication)?(?:\s+display)?\s*name|displayname|productname)[\"']?\s*[:=]\s*[\"']?([^\"'\r\n,;}\]]{2,160})"#).expect("static regex"));
     let app_id = APP_ID.get_or_init(|| Regex::new(r#"(?i)(?:app(?:lication)?(?:\s+policy)?(?:\s+with)?\s+id|applicationid|applicatonid|app_id)[\"']?\s*[:=]\s*[\"']?([0-9a-f]{8}-[0-9a-f-]{27,36})"#).expect("static regex"));
+    let script = SCRIPT.get_or_init(|| Regex::new(r"(?i)(?:detectionscripts|remediationscripts|installscripts|content)\\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})").expect("static regex"));
+    let name_pair = NAME_PAIR.get_or_init(|| {
+        Regex::new(
+            r"(?i)\bid\s*=\s*([0-9a-f]{8}-[0-9a-f-]{27,31})\s*,\s*name\s*=\s*([^)\r\n]{2,160})",
+        )
+        .expect("static regex")
+    });
     #[derive(Clone)]
     struct Row {
         event_id: String,
@@ -340,6 +349,7 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
         state: String,
         latest_sequence: u64,
         app_type: String,
+        guid_key: Option<String>,
     }
     let explicit_name = |message: &str| -> Option<String> {
         let raw = name
@@ -368,6 +378,18 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
             explicit_name(&row.message),
         ) {
             name_by_key.entry(key).or_insert(display);
+        }
+        // "[Win32App] Content cache miss for app (id = <guid>, name = <app>)".
+        for (key, display) in name_pair
+            .captures_iter(&row.message)
+            .filter_map(|captures| Some((captures.get(1)?.as_str(), captures.get(2)?.as_str())))
+        {
+            let display = display.trim().trim_matches(['"', '\'']);
+            if display.len() >= 2 {
+                name_by_key
+                    .entry(key.to_ascii_lowercase())
+                    .or_insert_with(|| display.to_owned());
+            }
         }
     }
     let mut apps = std::collections::BTreeMap::<String, AppBuild>::new();
@@ -405,6 +427,14 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
                 .into_iter()
                 .map(|(key, _)| key),
         );
+        // AgentExecutor runs app scripts as ...\DetectionScripts\<app-id>_N.ps1;
+        // the path GUID is the policy Id, so exit lines join to the named app.
+        keys.extend(
+            script
+                .captures_iter(&row.message)
+                .filter_map(|captures| captures.get(1))
+                .map(|value| value.as_str().to_ascii_lowercase()),
+        );
         let display = explicit_name(&row.message);
         if keys.is_empty() {
             if let Some(display) = &display {
@@ -422,6 +452,9 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
             let app_id = stable_id("app", &key);
             last_app.insert(row.artifact_id.clone(), key.clone());
             let item = apps.entry(app_id.clone()).or_default();
+            if item.guid_key.is_none() && key.len() == 36 && guid.is_match(&key) {
+                item.guid_key = Some(key.clone());
+            }
             item.name = item
                 .name
                 .take()
@@ -480,7 +513,12 @@ fn build_applications_and_attempts(conn: &Connection) -> Result<()> {
         } else {
             item.state
         };
-        let display_name = item.name.unwrap_or_else(|| "Unknown application".into());
+        // Apps identified only by their policy GUID (Win32 content that was
+        // already cached never logs a display name) stay distinguishable.
+        let display_name = item.name.unwrap_or_else(|| match &item.guid_key {
+            Some(key) => format!("Unknown application ({}…)", &key[..8]),
+            None => "Unknown application".into(),
+        });
         let evidence = item.evidence.into_iter().collect::<Vec<_>>();
         db::insert_application(
             conn,
@@ -855,6 +893,88 @@ fn evaluate_msi_transactions(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn exit_semantics(code: i64) -> Option<(&'static str, &'static str)> {
+    Some(match code {
+        1602 => (
+            "User cancelled the installation",
+            "Confirm the install runs unattended without interactive prompts, then retry.",
+        ),
+        1603 => (
+            "Fatal error during installation",
+            "Inspect the linked MSI log and installer prerequisites before retrying the application.",
+        ),
+        1618 => (
+            "Another installation was already in progress",
+            "Wait for Windows Installer to become idle, confirm the competing transaction, and retry the application.",
+        ),
+        1619 => (
+            "Installation package could not be opened",
+            "Verify the installer package is present, complete, and readable on the device.",
+        ),
+        1625 => (
+            "Blocked by system policy",
+            "Review Group Policy or AppLocker settings that block Windows Installer packages.",
+        ),
+        1628 => (
+            "Installation service could not be reached",
+            "Confirm the Windows Installer service is running and reachable, then retry.",
+        ),
+        1633 => (
+            "Package is not supported on this platform or architecture",
+            "Deploy an installer build that matches the device platform and architecture.",
+        ),
+        1638 => (
+            "Another version of this product is already installed",
+            "Uninstall or upgrade the existing version, or correct the installer's detection logic before retrying.",
+        ),
+        1639 => (
+            "Invalid installer command line",
+            "Correct the installer command line in the deployment configuration.",
+        ),
+        1708 => (
+            "Package could not be registered",
+            "Verify package registration prerequisites and installer integrity.",
+        ),
+        -2147024891 => (
+            "Access denied (0x80070005)",
+            "Check file and registry permissions for the install context, then retry.",
+        ),
+        -2147024894 => (
+            "Required file not found (0x80070002)",
+            "Verify the referenced file exists and the install source is complete.",
+        ),
+        -2147024893 => (
+            "Required path not found (0x80070003)",
+            "Verify the referenced path exists on the device.",
+        ),
+        -2147023276 => (
+            "Another installation was in progress (0x80070652)",
+            "Wait for the competing installation to finish, then retry.",
+        ),
+        -1073741510 => (
+            "Installation was cancelled or the process was terminated (0xC000013A)",
+            "Identify what terminated the installer (user, policy, timeout, reboot) and retry.",
+        ),
+        -2146233079 => (
+            ".NET runtime or configuration error (0x80131509)",
+            "Verify the required .NET runtime and application configuration on the device.",
+        ),
+        5 => (
+            "Access denied",
+            "Check permissions for the install context, then retry.",
+        ),
+        2 => (
+            "Required file not found",
+            "Verify the referenced file exists and the install source is complete.",
+        ),
+        3 => (
+            "Required path not found",
+            "Verify the referenced path exists on the device.",
+        ),
+        _ => return None,
+    })
+}
+
 fn evaluate_unmapped_exits(conn: &Connection) -> Result<()> {
     let mut stmt=conn.prepare("SELECT x.id,x.exit_code,x.application_id,COALESCE(e.temporal_scope,'unknown'),e.timestamp_utc FROM execution_attempts x LEFT JOIN evidence_links l ON l.id=json_extract(x.evidence_ids,'$[0]') LEFT JOIN events e ON e.id=COALESCE(l.event_id,CASE WHEN json_extract(x.evidence_ids,'$[0]') LIKE 'evidence:event:%' THEN substr(json_extract(x.evidence_ids,'$[0]'),10) END) WHERE x.exit_code IS NOT NULL AND x.exit_code NOT IN (0,3010,1641) AND x.application_id IS NOT NULL")?;
     let rows: Vec<(String, i64, String, String, Option<String>)> = stmt
@@ -900,28 +1020,42 @@ fn evaluate_unmapped_exits(conn: &Connection) -> Result<()> {
         }
     }
     for ((app, code, scope), group) in groups {
+        let name: String = conn
+            .query_row("SELECT name FROM applications WHERE id=?1", [&app], |r| {
+                r.get(0)
+            })
+            .unwrap_or_else(|_| "An application".into());
         let (rule, severity, title, explanation, recommendation) = match code {
             1603 => (
                 "ime.app.msi-1603.v1",
                 "high",
-                "MSI installation returned fatal error 1603",
-                "A recognized application attempt returned MSI code 1603. ESP impact is reported only when authoritative tracking links the application.",
-                "Inspect the linked MSI log and installer prerequisites before retrying the application.",
+                format!("{name}: MSI installation returned fatal error 1603"),
+                "A recognized application attempt returned MSI code 1603. ESP impact is reported only when authoritative tracking links the application.".to_owned(),
+                "Inspect the linked MSI log and installer prerequisites before retrying the application.".to_owned(),
             ),
             1618 => (
                 "ime.app.msi-1618.v1",
                 "medium",
-                "Another MSI installation was already running",
-                "A recognized application attempt returned MSI code 1618, indicating installer contention rather than an application-content diagnosis.",
-                "Wait for Windows Installer to become idle, confirm the competing transaction, and retry the application.",
+                format!("{name}: Another MSI installation was already running"),
+                "A recognized application attempt returned MSI code 1618, indicating installer contention rather than an application-content diagnosis.".to_owned(),
+                "Wait for Windows Installer to become idle, confirm the competing transaction, and retry the application.".to_owned(),
             ),
-            _ => (
-                "ime.app.unmapped-exit.v1",
-                "medium",
-                "Application returned an unmapped exit code",
-                "A recognized application attempt returned a code without a built-in semantic mapping. ESP impact is reported only when authoritative tracking links the application.",
-                "Verify the installer's documented return-code semantics and the linked detection result before retrying.",
-            ),
+            _ => match exit_semantics(code) {
+                Some((meaning, action)) => (
+                    "ime.app.unmapped-exit.v1",
+                    "medium",
+                    format!("{name} failed with exit code {code}"),
+                    format!("The latest failing attempt returned exit code {code}: {meaning}. ESP impact is reported only when authoritative tracking links the application."),
+                    action.to_owned(),
+                ),
+                None => (
+                    "ime.app.unmapped-exit.v1",
+                    "medium",
+                    format!("{name} failed with exit code {code}"),
+                    format!("A recognized application attempt returned exit code {code} without a built-in semantic mapping. ESP impact is reported only when authoritative tracking links the application."),
+                    "Verify the installer's documented return-code semantics and the linked detection result before retrying.".to_owned(),
+                ),
+            },
         };
         insert_finding_occurrences(
             conn,
@@ -931,9 +1065,9 @@ fn evaluate_unmapped_exits(conn: &Connection) -> Result<()> {
             scope == "current",
             group.tracked,
             Some(app.clone()),
-            title,
-            explanation,
-            recommendation,
+            &title,
+            &explanation,
+            &recommendation,
             group.evidence,
             group.count,
             Some(&format!("{app}:{code}:{scope}")),
@@ -1427,6 +1561,46 @@ mod tests {
     }
 
     #[test]
+    fn failed_application_surfaces_in_user_impact() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        event(
+            &conn,
+            "attempt-1638",
+            Some("2026-09-14T09:00:00+00:00"),
+            Some("IntuneManagementExtension"),
+            None,
+            Some("machine"),
+            "application name: Contoso Secure Client, installer exit code 1638",
+        );
+        correlate(&conn).unwrap();
+
+        let summary = crate::db::summary(&conn).unwrap();
+        let impact = summary
+            .user_impact
+            .iter()
+            .find(|item| item.kind == "application")
+            .expect("application impact");
+        assert_eq!(impact.name, "Contoso Secure Client");
+        assert!(impact.detail.contains("1638"));
+        assert!(impact.detail.contains("Another version"));
+        assert_eq!(impact.severity, "high");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM findings WHERE rule_id='ime.app.unmapped-exit.v1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(title.contains("Contoso Secure Client"));
+        assert!(exit_semantics(1603).is_some());
+        assert!(exit_semantics(-2147024891).is_some());
+    }
+
+    #[test]
     fn resolves_policy_package_and_profile_display_names() {
         let root = tempfile::tempdir().unwrap();
         let conn = database(
@@ -1569,6 +1743,105 @@ mod tests {
             })
             .unwrap();
         assert!(current);
+    }
+
+    #[test]
+    fn base64_tokens_do_not_become_installer_exit_codes() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        event(
+            &conn,
+            "policy-json",
+            Some("2026-09-14T09:00:00+00:00"),
+            Some("IntuneManagementExtension"),
+            None,
+            Some("machine"),
+            "Get policies = [{\"Id\":\"11111111-2222-3333-4444-555555555555\",\"Name\":\"Google Drive 129.0.1\",\"Token\":\"FXDb3K26ExiTGJ4033F1ksSB\",\"InstallContext\":2,\"Intent\":4}]",
+        );
+        correlate(&conn).unwrap();
+
+        let attempts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM execution_attempts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(attempts, 0);
+        let state: String = conn
+            .query_row("SELECT state FROM applications", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(state, "observed");
+    }
+
+    #[test]
+    fn script_path_guids_attribute_results_to_named_apps() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = database(
+            &root.path().join("analysis.sqlite"),
+            "IntuneManagementExtension.log",
+        );
+        for (key, message) in [
+            (
+                "policy",
+                r#"Get policies = [{"Id":"11111111-2222-3333-4444-555555555555","Name":"Google Drive 129.0.1","Intent":4}]"#,
+            ),
+            (
+                "detect",
+                r#"C:\Program Files (x86)\Microsoft Intune Management Extension\Content\DetectionScripts\11111111-2222-3333-4444-555555555555_1.ps1"#,
+            ),
+            ("exit", "Powershell exit code is 5"),
+            (
+                "other-detect",
+                r#"[Win32App] Detection script file C:\Program Files (x86)\Microsoft Intune Management Extension\Content\DetectionScripts\99999999-2222-3333-4444-555555555555_1.ps1 is saved."#,
+            ),
+            ("other-exit", "Powershell exit code is 0"),
+        ] {
+            event(
+                &conn,
+                key,
+                Some("2026-09-14T09:00:00+00:00"),
+                Some("IntuneManagementExtension"),
+                None,
+                Some("machine"),
+                message,
+            );
+        }
+        correlate(&conn).unwrap();
+
+        let (state, attempts): (String, i64) = conn
+            .query_row(
+                "SELECT state,attempt_count FROM applications WHERE name='Google Drive 129.0.1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), attempts), ("failed", 1));
+        let exit: i64 = conn
+            .query_row(
+                "SELECT exit_code FROM execution_attempts LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exit, 5);
+        let unnamed: String = conn
+            .query_row(
+                "SELECT name FROM applications WHERE name LIKE 'Unknown application (%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unnamed, "Unknown application (99999999…)");
+        let anonymous: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM applications WHERE name='Unknown application'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(anonymous, 0);
     }
 
     #[test]

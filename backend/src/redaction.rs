@@ -88,6 +88,13 @@ pub fn summary(mut value: Summary, mode: RedactionMode) -> Summary {
     for check in &mut value.health_checks {
         check.detail = text(&check.detail, mode);
     }
+    for item in &mut value.user_impact {
+        item.detail = text(&item.detail, mode);
+        if item.kind != "application" {
+            // Application display names are operational labels (see primary_diagnosis).
+            item.name = text(&item.name, mode);
+        }
+    }
     value.coverage_warning = value.coverage_warning.map(|v| text(&v, mode));
     value
 }
