@@ -141,14 +141,15 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
             .by_index(index)
             .map_err(|_| AppError::unsafe_archive("malformed zip entry"))?;
         if entry.is_dir() {
-            let directory = entry.name().trim_end_matches(['/', '\\']);
+            let name = zip_entry_name(&entry)?;
+            let directory = name.trim_end_matches(['/', '\\']);
             if !directory.is_empty() {
                 let _ = normalize_member_path(directory)?;
             }
             continue;
         }
         validate_zip_mode(entry.unix_mode())?;
-        let normalized = normalize_member_path(entry.name())?;
+        let normalized = normalize_member_path(&zip_entry_name(&entry)?)?;
         if !names.insert(normalized.to_lowercase()) {
             return Err(AppError::unsafe_archive("case-insensitive duplicate path"));
         }
@@ -189,7 +190,7 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
             let mut entry = archive
                 .by_index_raw(index)
                 .map_err(|_| AppError::unsafe_archive("malformed zip entry"))?;
-            let original = entry.name().to_owned();
+            let original = zip_entry_name(&entry)?;
             let normalized = normalize_member_path(&original)?;
             let declared_size = entry.size();
             record_quarantined_member(
@@ -209,7 +210,7 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
         if entry.is_dir() {
             continue;
         }
-        let original = entry.name().to_owned();
+        let original = zip_entry_name(&entry)?;
         let normalized = normalize_member_path(&original)?;
         let written = write_member(
             ctx,
@@ -227,6 +228,13 @@ fn extract_zip(ctx: &mut Context<'_>, path: &Path, parent_id: &str, layer: usize
         }
     }
     Ok(())
+}
+
+fn zip_entry_name<R: Read>(entry: &zip::read::ZipFile<'_, R>) -> Result<String> {
+    entry
+        .name()
+        .map(|name| name.into_owned())
+        .map_err(|_| AppError::unsafe_archive("unreadable zip entry name"))
 }
 
 fn expansion_ratio_exceeded(size: u64, compressed: u64, archive_len: u64, limit: u64) -> bool {

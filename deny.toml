@@ -2,9 +2,7 @@
 all-features = false
 
 [advisories]
-ignore = [
-  { id = "RUSTSEC-2021-0153", reason = "The pure-Rust evtx decoder depends on encoding 0.2.33; the advisory is unmaintained-only, reports no vulnerability, and has no safe upgrade path." },
-]
+ignore = []
 
 [licenses]
 allow = [
